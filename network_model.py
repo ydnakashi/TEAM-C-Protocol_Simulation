@@ -126,6 +126,7 @@ class NetworkModel:
         self._dropped: int = 0
         self._spawn_interval: int = 3
         self._events: list[str] = []
+        self._nodes: list[Node] = []
 
     # ── Properties ───────────────────────────
     @property
@@ -149,6 +150,34 @@ class NetworkModel:
                 dist = matrix[i][j]
                 if dist > 0:
                     self._graph.add_edge(i + 1, j + 1, weight=dist)  # ★ G.add_edge()
+
+    def build_from_coordinates(
+        self, coords: list[tuple[float, float]], link_range: float = 1.5
+    ) -> None:
+        """Build graph from (x, y) coordinates; connect pairs within link_range."""
+        self._graph.clear()
+        n = len(coords)
+        for i in range(n):
+            self._graph.add_node(i + 1, label=f"Node {i + 1}")
+        for i in range(n):
+            for j in range(i + 1, n):
+                x0, y0 = coords[i]
+                x1, y1 = coords[j]
+                dist = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+                if 0 < dist <= link_range:
+                    self._graph.add_edge(i + 1, j + 1, weight=round(dist, 2))
+
+    def compute_layout_from_coords(
+        self, coords: list[tuple[float, float]]
+    ) -> "LayoutResult":
+        """Build a LayoutResult using provided (x, y) coordinates as node positions."""
+        G = self._graph
+        positions = {i + 1: coords[i] for i in range(len(coords))}
+        node_labels = {nd: f"N{nd}" for nd in G.nodes()}
+        raw = nx.get_edge_attributes(G, "weight")
+        edge_labels = {k: f"{v:.2f} m" for k, v in raw.items()}
+        return LayoutResult(positions=positions, node_labels=node_labels,
+                            edge_labels=edge_labels)
 
     def add_node(self, node_id: int, **attrs: Any) -> None:
         self._graph.add_node(node_id, **attrs)

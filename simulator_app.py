@@ -56,9 +56,9 @@ class WirelessSimulator(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Wireless Network Simulator")
-        self.geometry("960x700")
+        self.geometry("1500x1000")
         self.configure(bg=BG)
-        self.resizable(False, False)
+        self.resizable(True, True)
 
         # ── Model ────────────────────────────
         self.model = NetworkModel()
@@ -66,6 +66,7 @@ class WirelessSimulator(tk.Tk):
         # ── View state ───────────────────────
         self.num_nodes: int = 0
         self.distance_entries: list[list[tk.Entry]] = []
+        self._grid_coords: list[tuple[float, float]] = []
         self._layout: LayoutResult | None = None
 
         # Simulation animation
@@ -101,33 +102,82 @@ class WirelessSimulator(tk.Tk):
         frame = tk.Frame(self.container, bg=BG)
         frame.pack(fill="both", expand=True, padx=30, pady=20)
 
-        tk.Label(frame, text="Step 1 — Define Nodes & Distances",
+        tk.Label(frame, text="Step 1 — Define Grid & Node Positions",
                  font=TITLE_FONT, bg=BG, fg=ACCENT).pack(anchor="w")
         tk.Label(
             frame,
-            text="Enter the number of wireless nodes, then fill in "
-                 "pairwise distances (meters).\n"
-                 "Leave a cell as 0 or empty for no direct link.",
+            text="Set M × N grid dimensions to place nodes on a grid.\n"
+                 "Edit coordinates in the right panel, then click Update Preview to adjust.",
             font=FONT, bg=BG, fg=FG, justify="left",
-        ).pack(anchor="w", pady=(4, 12))
+        ).pack(anchor="w", pady=(4, 8))
 
-        # Node count
+        # ── Controls ─────────────────────────
         top = tk.Frame(frame, bg=BG)
-        top.pack(anchor="w", pady=(0, 10))
-        tk.Label(top, text="Number of nodes:", font=FONT_BOLD,
-                 bg=BG, fg=FG).pack(side="left")
-        self.node_var = tk.StringVar(value="4")
-        tk.Spinbox(top, from_=2, to=12, width=4, textvariable=self.node_var,
+        top.pack(anchor="w", pady=(0, 8))
+
+        tk.Label(top, text="Rows (M):", font=FONT_BOLD, bg=BG, fg=FG).pack(side="left")
+        self.rows_var = tk.StringVar(value="3")
+        tk.Spinbox(top, from_=1, to=20, width=3, textvariable=self.rows_var,
                    font=FONT, bg=ENTRY_BG, fg=FG, buttonbackground=BTN_BG,
-                   insertbackground=FG, relief="flat").pack(side="left", padx=8)
-        tk.Button(top, text="Generate Table", font=FONT_BOLD,
+                   insertbackground=FG, relief="flat").pack(side="left", padx=(4, 12))
+
+        tk.Label(top, text="Cols (N):", font=FONT_BOLD, bg=BG, fg=FG).pack(side="left")
+        self.cols_var = tk.StringVar(value="3")
+        tk.Spinbox(top, from_=1, to=30, width=3, textvariable=self.cols_var,
+                   font=FONT, bg=ENTRY_BG, fg=FG, buttonbackground=BTN_BG,
+                   insertbackground=FG, relief="flat").pack(side="left", padx=(4, 12))
+
+        tk.Label(top, text="Link Range:", font=FONT_BOLD, bg=BG, fg=FG).pack(side="left")
+        self.range_var = tk.StringVar(value="1.5")
+        tk.Spinbox(top, from_=0.5, to=50.0, increment=0.5, width=5,
+                   textvariable=self.range_var,
+                   font=FONT, bg=ENTRY_BG, fg=FG, buttonbackground=BTN_BG,
+                   insertbackground=FG, relief="flat").pack(side="left", padx=(4, 12))
+
+        tk.Button(top, text="Generate Grid", font=FONT_BOLD,
                   bg=ACCENT, fg="#11111b", activebackground=ACCENT2,
                   relief="flat", padx=14, pady=4,
-                  command=self._generate_table).pack(side="left", padx=8)
+                  command=self._generate_grid).pack(side="left")
 
-        self.table_frame = tk.Frame(frame, bg=BG)
-        self.table_frame.pack(fill="both", expand=True)
+        # ── Two-panel content ────────────────
+        content = tk.Frame(frame, bg=BG)
+        content.pack(fill="both", expand=True)
 
+        # Left: grid preview (matplotlib canvas)
+        self.grid_canvas_frame = tk.Frame(content, bg=BG_DARK)
+        self.grid_canvas_frame.pack(side="left", fill="both", expand=True)
+
+        # Right: coordinate text editor
+        right = tk.Frame(content, bg=BG, width=280)
+        right.pack(side="right", fill="y", padx=(10, 0))
+        right.pack_propagate(False)
+
+        tk.Label(right, text="Node Coordinates", font=FONT_BOLD,
+                 bg=BG, fg=ACCENT).pack(anchor="w")
+        tk.Label(right, text="One per line:  x, y", font=MONO,
+                 bg=BG, fg=FG_DIM).pack(anchor="w", pady=(2, 4))
+
+        text_frame = tk.Frame(right, bg=BG_DARK)
+        text_frame.pack(fill="both", expand=True)
+        coord_sb_y = ttk.Scrollbar(text_frame, orient="vertical")
+        coord_sb_x = ttk.Scrollbar(text_frame, orient="horizontal")
+        self.coord_text = tk.Text(
+            text_frame, font=MONO, bg=ENTRY_BG, fg=FG,
+            insertbackground=FG, relief="flat", wrap="none",
+            yscrollcommand=coord_sb_y.set, xscrollcommand=coord_sb_x.set,
+        )
+        coord_sb_y.configure(command=self.coord_text.yview)
+        coord_sb_x.configure(command=self.coord_text.xview)
+        coord_sb_y.pack(side="right", fill="y")
+        coord_sb_x.pack(side="bottom", fill="x")
+        self.coord_text.pack(fill="both", expand=True, padx=2, pady=2)
+
+        tk.Button(right, text="↺  Update Preview", font=FONT_BOLD,
+                  bg=BTN_BG, fg=FG, activebackground=ACCENT,
+                  relief="flat", padx=10, pady=4,
+                  command=self._update_grid_preview).pack(fill="x", pady=(6, 0))
+
+        # ── Navigation ───────────────────────
         nav = tk.Frame(frame, bg=BG)
         nav.pack(fill="x", pady=(10, 0))
         tk.Button(nav, text="Next  →  View Network Graph", font=FONT_BOLD,
@@ -135,73 +185,122 @@ class WirelessSimulator(tk.Tk):
                   relief="flat", padx=20, pady=6,
                   command=self._go_to_graph).pack(side="right")
 
-    def _generate_table(self) -> None:
-        for w in self.table_frame.winfo_children():
-            w.destroy()
+        # Auto-generate on first load
+        self._generate_grid()
+
+    def _generate_grid(self) -> None:
         try:
-            n = int(self.node_var.get())
+            m = int(self.rows_var.get())
+            n = int(self.cols_var.get())
         except ValueError:
-            messagebox.showerror("Error", "Enter a valid integer."); return
-        if not 2 <= n <= 12:
-            messagebox.showerror("Error", "Between 2 and 12."); return
+            messagebox.showerror("Error", "Enter valid integers for M and N."); return
+        if not (1 <= m <= 10 and 1 <= n <= 10):
+            messagebox.showerror("Error", "M and N must each be between 1 and 10."); return
+        if m * n < 2:
+            messagebox.showerror("Error", "Grid must have at least 2 nodes (M × N ≥ 2)."); return
 
-        self.num_nodes = n
-        self.distance_entries = []
+        # Row-major order; (0,0) top-left, x increases right, y increases downward
+        coords: list[tuple[float, float]] = [
+            (float(col), float(row))
+            for row in range(m) for col in range(n)
+        ]
+        self.num_nodes = len(coords)
+        self._grid_coords = coords
 
-        canvas = tk.Canvas(self.table_frame, bg=BG, highlightthickness=0)
-        sb = ttk.Scrollbar(self.table_frame, orient="vertical", command=canvas.yview)
-        inner = tk.Frame(canvas, bg=BG)
-        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=inner, anchor="nw")
-        canvas.configure(yscrollcommand=sb.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
+        self.coord_text.delete("1.0", "end")
+        for x, y in coords:
+            self.coord_text.insert("end", f"{x:.0f}, {y:.0f}\n")
 
-        tk.Label(inner, text="", width=8, bg=BG).grid(row=0, column=0)
-        for j in range(n):
-            tk.Label(inner, text=f"Node {j+1}", font=FONT_BOLD,
-                     bg=BG, fg=ACCENT, width=8).grid(row=0, column=j+1, padx=2, pady=2)
+        self._draw_grid_canvas(coords)
 
-        _sample = {(0,1): "50", (0,2): "80", (0,3): "0",
-                   (1,2): "60", (1,3): "90", (2,3): "45"}
+    def _draw_grid_canvas(self, coords: list[tuple[float, float]]) -> None:
+        for w in self.grid_canvas_frame.winfo_children():
+            w.destroy()
 
-        for i in range(n):
-            tk.Label(inner, text=f"Node {i+1}", font=FONT_BOLD,
-                     bg=BG, fg=ACCENT, width=8, anchor="e"
-                     ).grid(row=i+1, column=0, padx=2, pady=2)
-            row_e: list[tk.Entry] = []
-            for j in range(n):
-                e = tk.Entry(inner, width=8, font=FONT, justify="center",
-                             bg=ENTRY_BG, fg=FG, insertbackground=FG, relief="flat")
-                e.grid(row=i+1, column=j+1, padx=2, pady=2)
-                if i == j:
-                    e.insert(0, "0")
-                    e.configure(state="disabled", disabledbackground=BG_DARK,
-                                disabledforeground="#585b70")
-                elif n <= 5 and (min(i,j), max(i,j)) in _sample:
-                    e.insert(0, _sample[(min(i,j), max(i,j))])
-                row_e.append(e)
-            self.distance_entries.append(row_e)
+        fig = Figure(figsize=(5.5, 4.5), facecolor=BG)
+        ax = fig.add_subplot(111)
+        ax.set_facecolor(BG)
+        ax.set_title("Node Layout Preview", color=FG, fontsize=11, pad=8)
+        ax.set_xlabel("X", color=FG_DIM, fontsize=9)
+        ax.set_ylabel("Y", color=FG_DIM, fontsize=9)
+        ax.tick_params(axis="both", colors=FG_DIM, labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_edgecolor(BTN_BG)
+        ax.grid(True, color=BTN_BG, alpha=0.5, linewidth=0.8)
+        ax.set_axisbelow(True)
 
-    def _read_distance_matrix(self) -> list[list[float]]:
-        matrix = []
-        for i in range(self.num_nodes):
-            row = []
-            for j in range(self.num_nodes):
-                raw = self.distance_entries[i][j].get().strip()
-                try:    row.append(float(raw) if raw else 0.0)
-                except: row.append(0.0)
-            matrix.append(row)
-        return matrix
+        if coords:
+            xs = [c[0] for c in coords]
+            ys = [c[1] for c in coords]
+            ax.scatter(xs, ys, s=350, c=NODE_COLOR, zorder=5,
+                       edgecolors="#11111b", linewidths=1.5)
+            for i, (x, y) in enumerate(coords):
+                ax.annotate(f"N{i+1}", (x, y), fontsize=8,
+                            color="#11111b", ha="center", va="center",
+                            fontweight="bold", zorder=6)
+
+            xmin, xmax = min(xs), max(xs)
+            ymin, ymax = min(ys), max(ys)
+            xpad = max((xmax - xmin) * 0.25, 0.5)
+            ypad = max((ymax - ymin) * 0.25, 0.5)
+            ax.set_xlim(xmin - xpad, xmax + xpad)
+            ax.set_ylim(ymax + ypad, ymin - ypad)  # invert: 0 at top, increases downward
+
+        fig.tight_layout()
+        canvas = FigureCanvasTkAgg(fig, master=self.grid_canvas_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+
+    def _update_grid_preview(self) -> None:
+        coords = self._parse_coordinate_text()
+        if coords is None:
+            return
+        self._grid_coords = coords
+        self.num_nodes = len(coords)
+        self._draw_grid_canvas(coords)
+
+    def _parse_coordinate_text(self) -> list[tuple[float, float]] | None:
+        raw = self.coord_text.get("1.0", "end").strip()
+        if not raw:
+            messagebox.showwarning("No data", "Enter at least two coordinates."); return None
+        coords: list[tuple[float, float]] = []
+        for i, line in enumerate(raw.splitlines(), 1):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(",")
+            if len(parts) != 2:
+                messagebox.showerror("Parse error",
+                    f"Line {i}: expected  x, y  — got: {line!r}"); return None
+            try:
+                x, y = float(parts[0]), float(parts[1])
+            except ValueError:
+                messagebox.showerror("Parse error",
+                    f"Line {i}: non-numeric value: {line!r}"); return None
+            coords.append((x, y))
+        if len(coords) < 2:
+            messagebox.showwarning("Too few nodes",
+                "Enter at least 2 node coordinates."); return None
+        return coords
 
     def _go_to_graph(self) -> None:
-        if self.num_nodes == 0 or not self.distance_entries:
-            messagebox.showwarning("No data", "Generate the table first."); return
-        matrix = self._read_distance_matrix()
-        self.model.build_from_matrix(matrix)
+        coords = self._parse_coordinate_text()
+        if coords is None:
+            return
+        try:
+            link_range = float(self.range_var.get())
+        except ValueError:
+            messagebox.showerror("Error", "Enter a valid link range."); return
+        self._grid_coords = coords
+        self.num_nodes = len(coords)
+        self.model.build_from_coordinates(coords, link_range)
         if not self.model.has_edges():
-            messagebox.showwarning("No links", "Enter at least one positive distance."); return
-        self._layout = self.model.compute_layout()
+            messagebox.showwarning(
+                "No links",
+                "No nodes are within link range of each other.\n"
+                "Try increasing the Link Range value.",
+            ); return
+        self._layout = self.model.compute_layout_from_coords(coords)
         self.show_page("graph")
 
     # ═════════════════════════════════════════
