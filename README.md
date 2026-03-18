@@ -28,6 +28,7 @@ Simulating a novel protocol, TEAM-C, in wireless sensor networks
         - routing to parent (amy)
             - slotted TDMA
             - aggregation
+            - worthiness calculation
         - CH updating (Isabella)
             - worthiness score is less than thresold
             - find new CH if old CH or S_CH died
