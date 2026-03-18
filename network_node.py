@@ -1,3 +1,5 @@
+from enum import Enum, auto
+
 class NodeType(Enum):
     IRRESOLUTE = "irresolute node"
     ORDINARY = "ordinary node"
