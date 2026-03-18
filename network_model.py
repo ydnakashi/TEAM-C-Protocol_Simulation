@@ -35,6 +35,7 @@ from enum import Enum, auto
 from typing import Any
 
 import networkx as nx
+from network_node import *
 
 
 # ──────────────────────────────────────────────

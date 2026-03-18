@@ -23,7 +23,7 @@ class Node():
         self.coordinates: tuple[float, float] = (0.0, 0.0)
         self.parent: int = 0
         self.nodeType: NodeType = NodeType.IRRESOLUTE
-
+     
     def get_worthiness_score(self) -> float:
         return self.own_worthiness_score
     
