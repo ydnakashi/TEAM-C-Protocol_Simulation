@@ -64,6 +64,12 @@ class PacketStatus(Enum):
     DELIVERED  = auto()
     DROPPED    = auto()
 
+class Phase(Enum):
+    INIT_ROLES = auto()
+    PARENT_SELECTION = auto()
+    ROUTING = auto()
+    ELECTION = auto()
+
 
 @dataclass
 class Packet:
@@ -128,6 +134,9 @@ class NetworkModel:
         self._spawn_interval: int = 3
         self._events: list[str] = []
         self._nodes: list[Node] = []
+        self._active: list[Node] = []
+        self._tdma_slot: int = 0
+        self._phase: Phase = Phase.ROUTING  # Change this later
 
     # ── Properties ───────────────────────────
     @property
@@ -145,12 +154,12 @@ class NetworkModel:
         self._graph.clear()                          # ★ G.clear()
         n = len(matrix)
         for i in range(n):
-            self._graph.add_node(i + 1, label=f"Node {i + 1}")  # ★ G.add_node()
+            self._graph.add_node(i + 1, label=f"Node {i + 1}", id=i+1, chldList={})
         for i in range(n):
             for j in range(i + 1, n):
                 dist = matrix[i][j]
                 if dist > 0:
-                    self._graph.add_edge(i + 1, j + 1, weight=dist)  # ★ G.add_edge()
+                    self._graph.add_edge(i + 1, j + 1, weight=dist)
 
     def build_from_coordinates(
         self, coords: list[tuple[float, float]], link_range: float = 1.5
@@ -243,6 +252,7 @@ class NetworkModel:
         if node_id not in self._graph.nodes():
             raise ValueError(f"Node {node_id} not in graph")
         self._base_station = node_id
+        self._graph.nodes[node_id]["waiting"] = 8  # Replace this with the number of children
 
     def reset_simulation(self) -> None:
         """Clear all packets and counters; keep graph + base station."""
@@ -256,11 +266,16 @@ class NetworkModel:
     def get_source_nodes(self) -> list[int]:
         """Non-base nodes that have a path to the base station."""
         srcs = []
+        self._graph.nodes[self._base_station]["chldList"] = {}
+
         for nd in self._graph.nodes():
             if nd == self._base_station:
                 continue
             if nx.has_path(self._graph, nd, self._base_station):  # ★ nx.has_path()
                 srcs.append(nd)
+                self._graph.nodes[self._base_station]["chldList"][nd] = nd    # Temporary child node testing
+                self._graph.nodes[nd]["tdmaSlot"] = nd
+                self._graph.nodes[nd]["totalSlots"] = 8+1  # total slots + 1
         return sorted(srcs)
 
     def spawn_packet(self, source: int | None = None) -> Packet | None:
@@ -268,14 +283,15 @@ class NetworkModel:
         Create a packet at *source* (random if None) routed to base
         via nx.shortest_path.  Returns the Packet or None.
         """
-        sources = self.get_source_nodes()
-        if not sources:
-            return None
-        if source is None:
-            source = random.choice(sources)
-        elif source not in sources:
-            return None
+        # sources = self.get_source_nodes()
+        # if not sources:
+        #     return None
+        # if source is None:
+        #     source = random.choice(sources)
+        # elif source not in sources:
+        #     return None
 
+        # CHANGE THIS PART TO ROUTING TO PARENT NODE
         try:
             path = nx.shortest_path(                    # ★ nx.shortest_path()
                 self._graph, source=source,
@@ -287,8 +303,8 @@ class NetworkModel:
         pkt = Packet(
             packet_id=self._next_packet_id,
             source=source,
-            destination=self._base_station,
-            path=path,
+            destination=path[1], # CHANGE THIS TO PARENT
+            path=path[:2],  # CHANGE THIS TO [node, parent]
         )
         self._next_packet_id += 1
         self._packets.append(pkt)
@@ -305,16 +321,46 @@ class NetworkModel:
         self._tick += 1
         self._events = []
         SPEED = 0.20        # fraction-of-hop per tick
+        nodes = self.get_source_nodes()
+        delivered = [p for p in self._packets if p.is_delivered]
 
-        # ── Auto-spawn ───────────────────────
-        if self._tick % self._spawn_interval == 0:
-            pkt = self.spawn_packet()
-            if pkt:
-                route_str = " → ".join(str(n) for n in pkt.path)
-                self._events.append(
-                    f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} "
-                    f"spawned at Node {pkt.source}   route: {route_str}"
-                )
+        # Routing phase
+        if(self._phase == Phase.ROUTING and len(delivered) == len(self._packets)):
+            
+            # Change to next phase if routing is finished
+            if(self._graph.nodes[self._base_station]["waiting"] == 0):  # Add a variable that tracks how many children sent packets? issue with lost packets, might need a counter per CH for how long to wait until marking it as lost and to move on
+                self._phase = Phase.ELECTION
+                self._graph.nodes[self._base_station]["waiting"] = 8  # reset back to # of children
+
+            # Continue routing when all packets have made it to next-hop
+            elif (self._tick % self._spawn_interval == 0):
+                
+                self._tdma_slot+=1  # Start a new TDMA slot if all packets reached the next-hop
+
+                # ── Create packets ───────────────────────
+                # if self._tick % self._spawn_interval == 0:
+                for node in nodes:
+                    # ADD CHECK TO SEE IF NODE RECEIVED ALL NODES FROM CHILDREN (lost packets?)
+                    if self._tdma_slot % self._graph.nodes[node]["totalSlots"] == self._graph.nodes[node]["tdmaSlot"]:
+                        pkt = self.spawn_packet(node)
+                        if pkt:
+                            route_str = " → ".join(str(n) for n in pkt.path)
+                            self._events.append(
+                                f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} "
+                                f"spawned at Node {pkt.source}   route: {route_str}"
+                            )
+        
+        # Init phase
+        elif (self._phase == Phase.INIT_ROLES):
+            pass
+
+        # Parent selection
+        elif(self._phase == Phase.PARENT_SELECTION):
+            pass
+
+        # S_CH/CH election
+        elif(self._phase == Phase.ELECTION):
+            pass
 
         # ── Move packets ─────────────────────
         for pkt in self._packets:
@@ -337,8 +383,11 @@ class NetworkModel:
                         f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} "
                         f"DELIVERED → base station (Node {self._base_station})"
                     )
+                    # parent = self._graph.nodes[pkt.source]["parent"]
+                    # self._graph.nodes[parent]["waiting"] -= 1
+                    self._graph.nodes[self._base_station]["waiting"]-=1  # temporary BS code
 
-        active = [p for p in self._packets if p.status == PacketStatus.IN_TRANSIT]
+        self._active = [p for p in self._packets if p.status == PacketStatus.IN_TRANSIT]
 
         return SimulationSnapshot(
             tick=self._tick,
@@ -346,7 +395,7 @@ class NetworkModel:
             base_station=self._base_station,
             delivered_count=self._delivered,
             dropped_count=self._dropped,
-            active_count=len(active),
+            active_count=len(self._active),
             events=list(self._events),
         )
 
