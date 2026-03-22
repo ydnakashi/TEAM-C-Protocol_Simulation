@@ -2,11 +2,11 @@ import math
 import networkx as nx
 
 class Node:
-    def __init__(self, id, power=100, coords=[0,0]):
+    def __init__(self, id, power=100, coords=None):
         self.id = id
         self.state = None
         self.power = power
-        self.coords = coords
+        self.coords = coords if coords is not None else [0, 0]
         self.worthiness = 100
         self.timeSlot = 0
 
@@ -86,7 +86,8 @@ def initialSelection(graph, Rc=20, alpha=0.5):
     # dimensions of the graph, currently hardcoded for now ...
     x, y = 100, 100
 
-    for node in graph.nodes:      
+    for ni in graph.nodes():      
+        node = ni["node"]
         x1, y1 = node.coords
     
         for other in graph.nodes:

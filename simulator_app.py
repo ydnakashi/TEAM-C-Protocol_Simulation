@@ -347,14 +347,16 @@ class WirelessSimulator(tk.Tk):
 
     def _render_static_network(self, parent: tk.Frame, layout: LayoutResult) -> None:
         G = self.model.graph
+
+        print("size ", G.size)
         fig = Figure(figsize=(9.0, 3.6), facecolor=BG)
         ax = fig.add_subplot(111)
         ax.set_facecolor(BG); ax.axis("off")
         ax.set_title("Wireless Network Topology", color=FG, fontsize=13,
                       fontweight="bold", pad=10)
         pos = layout.positions
-        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=EDGE_COLOR,
-                               width=2, alpha=0.7)
+        # nx.draw_networkx_edges(G, pos, ax=ax, edge_color=EDGE_COLOR,
+        #                        width=2, alpha=0.7)
         nx.draw_networkx_nodes(G, pos, ax=ax, node_color=NODE_COLOR,
                                node_size=600, edgecolors="#11111b", linewidths=2)
         nx.draw_networkx_labels(G, pos, ax=ax, labels=layout.node_labels,

@@ -36,7 +36,7 @@ from typing import Any
 
 import networkx as nx
 from network_node import *
-
+from node import Child, Node
 
 # ──────────────────────────────────────────────
 #  Data classes
@@ -70,14 +70,6 @@ class Phase(Enum):
     PARENT_SELECTION = auto()
     ROUTING = auto()
     ELECTION = auto()
-
-
-@dataclass
-class Child:
-    """A node that sends packets to its parent. Seen from the view of the parent."""
-    tdma_slot: int = -1    # -1 means no slot given
-    received: bool = False
-    overall_score: float = 0
 
 
 @dataclass
@@ -172,21 +164,33 @@ class NetworkModel:
                 if dist > 0:
                     self._graph.add_edge(i + 1, j + 1, weight=dist)
 
-    def build_from_coordinates(
-        self, coords: list[tuple[float, float]], link_range: float = 1.5
-    ) -> None:
-        """Build graph from (x, y) coordinates; connect pairs within link_range."""
+    def build_from_coordinates(self, coords: list[tuple[float, float]], link_range: float = 1.5) -> None:
         self._graph.clear()
         n = len(coords)
         for i in range(n):
-            self._graph.add_node(i + 1, label=f"Node {i + 1}", id=i+1, sent=False)
+            node_id = i + 1  
+      
+        # for each node, call a randomized battery function?
+            self._graph.add_node(i+1, label=f"Node{i+1}", node=(Node(node_id, 100, [coords[i][0], coords[i][1]]))
+            )
+        # self._graph.add_node(Node())
         for i in range(n):
             for j in range(i + 1, n):
                 x0, y0 = coords[i]
                 x1, y1 = coords[j]
+
                 dist = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
                 if 0 < dist <= link_range:
-                    self._graph.add_edge(i + 1, j + 1, weight=round(dist, 2))
+                    id_i = i + 1
+                    id_j = j + 1
+
+                    self._graph.add_edge(
+                        id_i, id_j,
+                        weight=round(dist, 2)
+                    )
+
+      
+        # print("TEST ID", node[1].id)
 
     def compute_layout_from_coords(
         self, coords: list[tuple[float, float]]
@@ -287,9 +291,8 @@ class NetworkModel:
     def get_parent_nodes(self) -> list[int]:
         """Nodes that have children."""
         parents = []
-
         for nd in self._graph.nodes():
-            if "chdList" in self._graph.nodes[nd] and len(self._graph.nodes[nd]["chdList"]) > 0:
+            if len(self._graph.nodes[nd]["node"].chdList) > 0:
                 parents.append(nd)
 
         return sorted(parents)
@@ -302,18 +305,18 @@ class NetworkModel:
         """Create TDMA schedule for node's children"""
         slot = 0
         total = 0
-        for id, child in self._graph.nodes[node]["chdList"].items():
+        for id, child in self._graph.nodes[node]["node"].chdList.items():
             child.tdma_slot = slot
             slot += 1
             total += 1
         
-        self._graph.nodes[node]["waiting"] = total  # Total time slots
-        self._graph.nodes[node]["timer"] = -1  # max time to wait before declaring lost packet
+        self._graph.nodes[node]["node"].waiting = total  # Total time slots
+        self._graph.nodes[node]["node"].timer = -1  # max time to wait before declaring lost packet
 
     def update_TDMA_slot(self, node: int, slot: int, total_slots: int):
         """Record TDMA schedule information when received by parent."""
-        self._graph.nodes[node]["tdmaSlot"] = slot
-        self._graph.nodes[node]["totalSlots"] = total_slots
+        self._graph.nodes[node]["node"].tdmaSlot = slot
+        self._graph.nodes[node]["node"].totalSlots = total_slots
         return node
 
     def spawn_packet(self, content: dict | None = {}, source: int | None = None, dest: int | None = None) -> Packet | None:
@@ -376,9 +379,9 @@ class NetworkModel:
         # Routing phase
         if(self._phase == Phase.ROUTING and len(delivered) == len(self._packets)):
             # Change to next phase if routing is finished
-            if(self._graph.nodes[self._base_station]["waiting"] == 0):  # Add a variable that tracks how many children sent packets? issue with lost packets, might need a counter per CH for how long to wait until marking it as lost and to move on
+            if(self._graph.nodes[self._base_station]["node"].waiting == 0):  # Add a variable that tracks how many children sent packets? issue with lost packets, might need a counter per CH for how long to wait until marking it as lost and to move on
                 self._phase = Phase.ELECTION
-                self._graph.nodes[self._base_station]["waiting"] = len(self._graph.nodes[self._base_station]["chdList"])  # reset back to # of children
+                self._graph.nodes[self._base_station]["node"].waiting = len(self._graph.nodes[self._base_station]["chdList"])  # reset back to # of children
 
             # Continue routing when all packets have made it to next-hop
             elif (self._tick % self._spawn_interval == 0):
@@ -388,12 +391,12 @@ class NetworkModel:
                 # ── Create packets ───────────────────────
                 for node in self._graph.nodes():
                     
-                    if("timer" in self._graph.nodes[node] and self._graph.nodes[node]["timer"] == 0):
-                        if(self._graph.nodes[node]["sent"]):  # NOT TESTED YET
-                            if(not self._graph.nodes[node]["p_rcvd"]):
+                    if("timer" in self._graph.nodes[node] and self._graph.nodes[node]["node"].timer == 0):
+                        if(self._graph.nodes[node]["node"].sent):  # NOT TESTED YET
+                            if(not self._graph.nodes[node]["node"].p_rcvd):
                                 print("Bad parent: ")
                         else:
-                            for i, child in self._graph.nodes[node]["chdList"].items():
+                            for i, child in self._graph.nodes[node]["node"].chdList.items():
                                 if(not child.received):
                                     print("Bad node: ", child)
                                     # update its L and N or something??
@@ -401,18 +404,18 @@ class NetworkModel:
                     
                     # Create packet during its TDMA slot if it hasn't sent it yet
                     # ADD CHECK TO SEE IF NODE RECEIVED ALL NODES FROM CHILDREN
-                    elif node != self._base_station and not self._graph.nodes[node]["sent"] and \
-                       self._tdma_slot % self._graph.nodes[node]["totalSlots"] == self._graph.nodes[node]["tdmaSlot"]:
+                    elif node != self._base_station and not self._graph.nodes[node]["node"].sent and \
+                       self._tdma_slot % self._graph.nodes[node]["node"].totalSlots == self._graph.nodes[node]["node"].tdmaSlot:
 
                         msg = {
                             "type": "DATA_MSG"
                         }
                         pkt = self.spawn_packet(msg, node)
-                        self._graph.nodes[node]["sent"] = True
-                        self._graph.nodes[node]["timer"] = self._loss_interval  # Set timer for ACK packet to be returned from parent
+                        self._graph.nodes[node]["node"].sent = True
+                        self._graph.nodes[node]["node"].timer = self._loss_interval  # Set timer for ACK packet to be returned from parent
 
                     # only decrease timer after the first receipt of a packet
-                    if("timer" in self._graph.nodes[node] and self._graph.nodes[node]["timer"]!=-1): self._graph.nodes[node]["timer"] -= 1
+                    if("timer" in self._graph.nodes[node] and self._graph.nodes[node]["node"].timer!=-1): self._graph.nodes[node]["node"].timer -= 1
         
         # Init phase
         elif (self._phase == Phase.INIT_ROLES):
@@ -428,8 +431,8 @@ class NetworkModel:
             
             # TEMPORARY TESTING DELETE LATER
             children = self.get_source_nodes()
-            self._graph.nodes[self._base_station]["chdList"] = {}
-            for n in children: self._graph.nodes[self._base_station]["chdList"][n] = Child()
+            self._graph.nodes[self._base_station]["node"].chdList = {}
+            for n in children: self._graph.nodes[self._base_station]["node"].chdList[n] = Child()
 
 
             # Loop through all parents
@@ -437,14 +440,14 @@ class NetworkModel:
                 parents = self.get_parent_nodes()
                 for parent in parents:
                     self.create_TDMA_schedule(parent)  # Create TDMA schedules for all children
-                    print(self._graph.nodes[parent]["chdList"])
+                    print(self._graph.nodes[parent]["node"].chdList)
 
-                    for child in self._graph.nodes[parent]["chdList"]:
+                    for child in self._graph.nodes[parent]["node"].chdList:
                         # Pass the schedule to the children
-                        schedule = {id: c.tdma_slot for id, c in self._graph.nodes[parent]["chdList"].items()}
+                        schedule = {id: c.tdma_slot for id, c in self._graph.nodes[parent]["node"].chdList.items()}
                         msg = {
                             "schd": schedule,
-                            "tt": self._graph.nodes[parent]["waiting"],
+                        "tt": self._graph.nodes[parent]["node"].waiting,
                             "type": "PREQ_ACK"   
                         }
                         pkt = self.spawn_packet(msg, parent, child)
@@ -480,20 +483,20 @@ class NetworkModel:
                     )
 
                     if(pkt.content["type"] == "DATA_MSG"):
-                        if(self._graph.nodes[self._base_station]["timer"] == -1):   # replace BS with pkt.destination
-                            self._graph.nodes[self._base_station]["timer"] = self._loss_interval * self._graph.nodes[self._base_station]["waiting"]
+                        if(self._graph.nodes[self._base_station]["node"].timer == -1):   # replace BS with pkt.destination
+                            self._graph.nodes[self._base_station]["node"].timer = self._loss_interval * self._graph.nodes[self._base_station]["node"].waiting
 
-                        self._graph.nodes[self._base_station]["waiting"]-=1  # replace BS with pkt.destination
-                        self._graph.nodes[self._base_station]["chdList"][pkt.source].received = True  # replace BS with pkt.destination
+                        self._graph.nodes[self._base_station]["node"].waiting-=1  # replace BS with pkt.destination
+                        self._graph.nodes[self._base_station]["node"].chdList[pkt.source].received = True  # replace BS with pkt.destination
 
                         self.spawn_packet({"type": "DATA_ACK"}, pkt.destination, pkt.source)  # Send ACK back
 
                     elif(pkt.content["type"] == "PREQ_ACK"):  # Update node's tdma slot received
-                        self._graph.nodes[pkt.destination]["tdmaSlot"] = pkt.content["schd"][pkt.destination]
-                        self._graph.nodes[pkt.destination]["totalSlots"] = pkt.content["tt"]
+                        self._graph.nodes[pkt.destination]["node"].tdmaSlot = pkt.content["schd"][pkt.destination]
+                        self._graph.nodes[pkt.destination]["node"].totalSlots = pkt.content["tt"]
 
                     elif(pkt.content["type"] == "DATA_ACK"):
-                        self._graph.nodes[pkt.destination]["p_rcvd"] = True
+                        self._graph.nodes[pkt.destination]["node"].p_rcvd = True
                         # Update worthiness score for parent
                         pass
 
