@@ -1,18 +1,18 @@
 from enum import Enum, auto
 
 class NodeType(Enum):
-    IRRESOLUTE = "irresolute node"
-    ORDINARY = "ordinary node"
-    SUBCLUSTER_HEAD = "subcluster head"
-    CLUSTER_HEAD = "cluster head"
-    BASE_STATION = "base station"
+    IRRESOLUTE = 4
+    ORDINARY = 3
+    SUBCLUSTER_HEAD = 2
+    CLUSTER_HEAD = 1
+    BASE_STATION = 0
 
 class EnergyConsumption(Enum): # All in nanojoules
-    ENERGY_PER_BIT = 50
-    ON_CONSUMPTION = auto()
-    S_CH_CONSUMPTION = auto()
-    CH_CONSUMPTION = auto()
-    BASE_STATION_CONSUMPTION = auto()
+    ENERGY_PER_BIT = 50 # nj/bit
+    EPSILON_FS = 0.01   # nj/bit/m^2
+    ENERGY_DA = 5 # nj/bit/signal
+    EPSILON_AMP = 0.0000013 # nj/bit/m^4
+    DISTANCE_LIMIT = 10 # m
 
 class Node():
     def __init__(self, id: int, x: float, y: float) -> None:

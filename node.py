@@ -1,8 +1,38 @@
 from dataclasses import dataclass
+from enum import Enum, auto
+import math
+
+class NodeType(Enum):
+    IRRESOLUTE = 4
+    ORDINARY = 3
+    SUBCLUSTER_HEAD = 2
+    CLUSTER_HEAD = 1
+    BASE_STATION = 0
+    ASLEEP = None
+    DEAD = 5
+
+# (fill_color, alpha, scatter_size)
+STATE_STYLE: dict[NodeType, tuple[str, float, int]] = {
+    NodeType.ASLEEP:   ("#45475a", 0.55, 130),
+    # NodeType.AWAKE:    ("#f9e2af", 0.85, 200),
+    NodeType.IRRESOLUTE:       ("#fab387", 0.80, 200),
+    NodeType.CLUSTER_HEAD:       ("#f38ba8", 1.00, 600),
+    NodeType.SUBCLUSTER_HEAD:      ("#cba6f7", 1.00, 380),
+    NodeType.ORDINARY: ("#89b4fa", 1.00, 260),
+    NodeType.DEAD:     ("#1e1e2e", 0.65, 100),
+}
+
+class EnergyConsumption(Enum): # All in nanojoules
+    ENERGY_PER_BIT = 50
+    ON_CONSUMPTION = auto()
+    S_CH_CONSUMPTION = auto()
+    CH_CONSUMPTION = auto()
+    BASE_STATION_CONSUMPTION = auto()
 
 @dataclass
 class Child:
     """A node that sends packets to its parent. Seen from the view of the parent."""
+    state: NodeType
     tdma_slot: int = -1    # -1 means no slot given
     received: bool = False
     overall_score: float = 0
@@ -15,6 +45,7 @@ class Node:
         self.coords = coords
         self.worthiness = 100
         self.timeSlot = 0
+        self.currentBSDist = 1000000000
 
         self.chdList = {}
         self.neighbourList = []
@@ -47,25 +78,41 @@ class Node:
         if(message['type'] == "MEMBERJOIN"):
             self.parent.receive(self, message, -1)
 
+        if(message['type'] == "CHROUTE"):
+            for neighbour, dist in self.neighbourList:
+                neighbour.receive(self, message, -1)
+
     def receive(self, sender, message, neighbourType):
-        # direct neighbour
+        # direct neighbour   
         if message["type"] == "BROADCAST" and neighbourType == 0:
             self.parent = sender
             # makes it a SubCH
-            if message['state'] == 1:
-                self.state = 2
+            if message['state'] == NodeType.CLUSTER_HEAD:
+                self.state = NodeType.SUBCLUSTER_HEAD
             else:
                 # ordinary node
-                self.state = 3
+                self.state = NodeType.ORDINARY
         
          # in broadcast range, no parent
         if message["type"] == "BROADCAST" and neighbourType == 1 and self.state == None:
             # IR state
             self.parent = sender
-            self.state = 4
+            self.state = NodeType.IRRESOLUTE
 
         if message["type"] == "MEMBERJOIN":
-            self.childList.append([message['id'], message['state'], message['coords']])
+            self.chdList[message['id']] = Child(state=message['state'])
+
+        if message["type"] == "CHROUTE":
+            if self.state == NodeType.CLUSTER_HEAD or self.state == NodeType.BASE_STATION: 
+                dist = math.sqrt((self.coords[0]-0)**2 + (self.coords[1]- 0)**2)
+                sender.receive(message= {
+                    "type": "CHRETURN",
+                    "dist": dist
+                })
+                
+        if message["type"] == "CHRETURN":
+            if message.dist > self.currentBSDist:
+                self.parent = sender
 
         
     def addNeighbour(self, node):
@@ -88,3 +135,16 @@ class Node:
     
     def calculateWorthiness(self):
         print('test')
+
+    def consume_energy(self, k: int, d: float) -> None:
+        consumption = 0.0
+        if self.nodeType == NodeType.ORDINARY:
+            consumption = EnergyConsumption.ENERGY_PER_BIT * k + EnergyConsumption.EPSILON_FS * k * d^2
+        elif self.nodeType == NodeType.BASE_STATION:
+            consumption = 0
+        else:
+            if (d < EnergyConsumption.DISTANCE_LIMIT):
+                consumption = (len(self.childList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT + EnergyConsumption.ENERGY_DA) + EnergyConsumption.EPSILON_FS * k * d^2
+            else:
+                consumption = (len(self.childList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT + EnergyConsumption.ENERGY_DA) + EnergyConsumption.EPSILON_AMP * k * d^4
+        self.energy -= consumption

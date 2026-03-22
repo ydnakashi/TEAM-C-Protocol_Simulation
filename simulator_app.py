@@ -22,6 +22,7 @@ from matplotlib.figure import Figure
 import networkx as nx
 
 from network_model import NetworkModel, LayoutResult
+from node import STATE_STYLE
 
 
 # ──────────────────────────────────────────────
@@ -48,7 +49,7 @@ TITLE_FONT  = ("Segoe UI", 18, "bold")
 MONO        = ("Consolas", 9)
 MONO_SM     = ("Consolas", 8)
 
-TICK_MS = 80          # milliseconds between simulation ticks
+TICK_MS = 40          # milliseconds between simulation ticks
 
 
 class WirelessSimulator(tk.Tk):
@@ -315,21 +316,21 @@ class WirelessSimulator(tk.Tk):
 
         stats = self.model.get_stats()
         conn = "fully connected" if stats.is_connected else f"{stats.num_components} component(s)"
-        tk.Label(frame,
-                 text=f"Nodes: {stats.num_nodes}    Edges: {stats.num_edges}    Topology: {conn}",
-                 font=MONO, bg=BG, fg=FG_DIM).pack(anchor="w", pady=(4, 4))
+        # tk.Label(frame,
+        #          text=f"Nodes: {stats.num_nodes}    Edges: {stats.num_edges}    Topology: {conn}",
+        #          font=MONO, bg=BG, fg=FG_DIM).pack(anchor="w", pady=(4, 4))
 
-        edge_str = "  ".join(f"({u}↔{v} {d['weight']:.0f}m)" for u, v, d in stats.edges)
-        tk.Label(frame, text=f"Links: {edge_str}", font=MONO,
-                 bg=BG, fg=FG_DIM, wraplength=900, justify="left"
-                 ).pack(anchor="w", pady=(0, 4))
+        # edge_str = "  ".join(f"({u}↔{v} {d['weight']:.0f}m)" for u, v, d in stats.edges)
+        # tk.Label(frame, text=f"Links: {edge_str}", font=MONO,
+        #          bg=BG, fg=FG_DIM, wraplength=900, justify="left"
+        #          ).pack(anchor="w", pady=(0, 4))
 
         fn_frame = tk.Frame(frame, bg=BG_DARK, relief="flat", bd=1)
         fn_frame.pack(fill="x", pady=(0, 6))
-        tk.Label(fn_frame,
-                 text="NetworkX:  " + " · ".join(self.model.nx_functions_used()),
-                 font=MONO_SM, bg=BG_DARK, fg=ACCENT2,
-                 wraplength=900, justify="left").pack(padx=8, pady=4)
+        # tk.Label(fn_frame,
+        #          text="NetworkX:  " + " · ".join(self.model.nx_functions_used()),
+        #          font=MONO_SM, bg=BG_DARK, fg=ACCENT2,
+        #          wraplength=900, justify="left").pack(padx=8, pady=4)
 
         self._render_static_network(frame, self._layout)
 
@@ -361,11 +362,11 @@ class WirelessSimulator(tk.Tk):
                                node_size=600, edgecolors="#11111b", linewidths=2)
         nx.draw_networkx_labels(G, pos, ax=ax, labels=layout.node_labels,
                                 font_size=9, font_color="#11111b", font_weight="bold")
-        nx.draw_networkx_edge_labels(
-            G, pos, ax=ax, edge_labels=layout.edge_labels,
-            font_size=8, font_color=ACCENT2,
-            bbox=dict(boxstyle="round,pad=0.2", facecolor=BG_DARK,
-                      edgecolor=ACCENT2, alpha=0.8))
+        # nx.draw_networkx_edge_labels(
+        #     G, pos, ax=ax, edge_labels=layout.edge_labels,
+        #     font_size=8, font_color=ACCENT2,
+        #     bbox=dict(boxstyle="round,pad=0.2", facecolor=BG_DARK,
+        #               edgecolor=ACCENT2, alpha=0.8))
         fig.tight_layout()
         canvas = FigureCanvasTkAgg(fig, master=parent)
         canvas.draw()
@@ -540,11 +541,14 @@ class WirelessSimulator(tk.Tk):
                                width=2, alpha=0.5)
 
         # ── Nodes — base station highlighted ─
-        regular = [n for n in G.nodes() if n != base]
-        if regular:
-            nx.draw_networkx_nodes(G, pos, ax=ax, nodelist=regular,
-                                   node_color=NODE_COLOR, node_size=500,
-                                   edgecolors="#11111b", linewidths=2)
+        for state in STATE_STYLE.keys():
+            nodes = [n for n in G.nodes().keys() if G.nodes()[n]["node"].state == state]
+            color, alpha, size = STATE_STYLE.get(state, ("#ffffff", 1.0, 200))
+            nx.draw_networkx_nodes(G, pos, ax=ax, nodelist=nodes,
+                                   node_color=color, node_size=size,
+                                   edgecolors="#11111b", linewidths=2, 
+                                   alpha=alpha)
+        # Base station
         nx.draw_networkx_nodes(G, pos, ax=ax, nodelist=[base],
                                node_color=BASE_COLOR, node_size=700,
                                edgecolors="#11111b", linewidths=2.5,
@@ -557,11 +561,11 @@ class WirelessSimulator(tk.Tk):
                                 font_size=8, font_color="#11111b", font_weight="bold")
 
         # ── Edge distance labels ─────────────
-        nx.draw_networkx_edge_labels(
-            G, pos, ax=ax, edge_labels=layout.edge_labels,
-            font_size=7, font_color=ACCENT2,
-            bbox=dict(boxstyle="round,pad=0.15", facecolor=BG_DARK,
-                      edgecolor=ACCENT2, alpha=0.7))
+        # nx.draw_networkx_edge_labels(
+        #     G, pos, ax=ax, edge_labels=layout.edge_labels,
+        #     font_size=7, font_color=ACCENT2,
+        #     bbox=dict(boxstyle="round,pad=0.15", facecolor=BG_DARK,
+        #               edgecolor=ACCENT2, alpha=0.7))
 
         # ── Packets (animated dots) ──────────
         pkt_positions = self.model.get_packet_render_positions(layout)
