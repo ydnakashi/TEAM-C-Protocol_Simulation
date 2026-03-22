@@ -2,19 +2,57 @@ import math
 import networkx as nx
 
 class Node:
-    def __init__(self, id, power=100):
+    def __init__(self, id, power=100, coords=[0,0]):
         self.id = id
+        self.state = None
         self.power = power
+        self.coords = coords
         self.worthiness = 100
         self.timeSlot = 0
 
         self.childList = []
         self.neighbourList = []
+        # twait is effected by neighbours within the RC, but broadcast messages can reach 3/2 x RC 
+        self.broadcastList = []
         self.parent = None
         self.parentScore = None
 
         self.twait = 0
 
+    def broadcast (self, message):
+        # print(f"Node {self.id} received:", message)
+
+        # get all nodes within the Rc distance
+        if(message['type'] == "BROADCAST"):
+            for neighbour, dist in self.neighbourList:
+                neighbour.receive(self, message, 0)
+
+            for neighbour, dist in self.broadcastList:
+                neighbour.receive(self, message, 1)
+        if(message['type'] == "MEMBERJOIN"):
+            self.parent.receive(self, message, -1)
+
+    def receive(self, sender, message, neighbourType):
+        # direct neighbour
+        if message["type"] == "BROADCAST" and neighbourType == 0:
+            self.parent = sender
+            # makes it a SubCH
+            if message['state'] == 1:
+                self.state = 2
+            else:
+                # ordinary node
+                self.state = 3
+        
+         # in broadcast range, no parent
+        if message["type"] == "BROADCAST" and neighbourType == 1 and self.state == None:
+            # IR state
+            self.parent = sender
+            self.state = 4
+
+        if message["type"] == "MEMBERJOIN":
+            self.childList.append([message['id'], message['state'], message['coords']])
+
+        
     def addNeighbour(self, node):
         self.neighbourList.append(node)
 
@@ -45,81 +83,106 @@ def initialSelection(graph, Rc=20, alpha=0.5):
     print("stat")
     # the total amount of nodes in the graph
     N = graph.number_of_nodes()
+    # dimensions of the graph, currently hardcoded for now ...
+    x, y = 100, 100
 
-    for node in graph.nodes:
-        neighbours = []
-        x1 = graph.nodes[node]["x"]
-        y1 = graph.nodes[node]["y"]
-
+    for node in graph.nodes:      
+        x1, y1 = node.coords
+    
         for other in graph.nodes:
             # check that the node is not itself
             if node == other:
                 continue
 
-            x2 = graph.nodes[other]["x"]
-            y2 = graph.nodes[other]["y"]
+            x2, y2 = other.coords
 
             # euclidean distance
             dist = math.sqrt((x1-x2)**2 + (y1-y2)**2)
-            print("distance: ", dist)
+            # print("distance: ", dist)
 
             if dist <= Rc:
-                neighbours.append((other, dist))
+                node.neighbourList.append((other, dist))
+            # only nodes that are within the multipled distance but outside of Rc are added
+            elif dist <= (3/2) * Rc:
+                node.broadcastList.append((other, dist))
+                
 
-        graph.nodes[node]["neighbours"] = neighbours
+    # nodes to cluster ratio
+    NC = x * y / (Rc) ** 2
+    NNavg = N / NC
 
-    total = sum(len(graph.nodes[n]["neighbours"]) for n in graph.nodes)
-    average = total / N
-    print("average: ", average)
-
-    # twait
+    # twait calculations
     for node in graph.nodes:
-        neighbours = graph.nodes[node]["neighbours"]
-        NNi = len(neighbours)
+        NNi = len(node.neighbourList)
 
         if NNi == 0:
-            graph.nodes[node]["twait"] = float("inf")
+            node.twait = 1000
             continue
 
         # icd compute
-        total_dist = sum(dist for (_, dist) in neighbours)
+        total_dist = sum(dist for (_, dist) in node.neighbourList)
         ICDi = total_dist / NNi
         print("ICDI: " ,ICDi)
 
-        if NNi > average:
+        if NNi > NNavg:
             twait = alpha * (ICDi / Rc) + (1 - alpha) * \
-                (1 - (NNi / N)) * (1 - ((NNi - average) / N))
+                (1 - (NNi / N)) * (1 - ((NNi - NNavg) / N))
         else:
             twait = alpha * (ICDi / Rc) + (1 - alpha) * \
                 (1 - (NNi / N))
-        graph.nodes[node]["twait"] = twait
+        node.twait = twait
+    createClusters(graph)
 
-def routing(node):
-    print("starting routing")
-    # unsure how our live routing is going to work ...
-    # using real time? wouldnt that use a lot of computing power?
-    # ie during our loop, EVERY node has to check if its their time slot, transport, calculate trust score
-    # and will time slots just be 'each iteration of a loop will be the new time slot?'
+def createClusters(graph):
+    print("starting clusters")
+    sortedNodes = sorted(graph.nodes(), key=lambda n: n.twait)
 
-    # send packet to parent 
-    # wait for ack 
-    # if ack received:
-    #     increase parents trust score
-    # else:
-    #     decrease parents trust score
+    # no broadcast received - send out a CH message
+    for node in sortedNodes:
+        if(node.parent == None):
+            node.broadcast(message={
+                "type": "BROADCAST",
+                "sender": node.id,
+                "state": 1})
+        # already has a CH parent, making it a SubCH
+        elif (node.parent.state != None):
+            node.broadcast(message={
+                "type": "BROADCAST",
+                "state": 2})
+     
+    for node in sortedNodes:
+        # if it is still an IR at the end, make it a CH
+        if node.state == 4:
+            node.state = 1
+        # make it a CH if it still has no parent
+        elif node.state == None: 
+            node.state = 1
 
+        if node.parent != None:
+            node.broadcast(message = {
+                "type": "MEMBERJOIN",
+                "id": node.id,
+                "state": node.state,
+                "coords": node.coords
+            })
+        
 
 G = nx.Graph()
-G.add_node(0, x=10, y=20)
-G.add_node(1, x=15, y=25)
-G.add_node(2, x=100, y=100)
-G.add_node(3, x=18, y=23)
+node1 = Node(0, power=100, coords=[10,20])
+node2 = Node(1, power=100, coords=[15,25])
+node3 = Node(2, power=100, coords=[50,50])
+node4 = Node(3, power=100, coords=[18,23])
+
+G.add_node(node1)
+G.add_node(node2)
+G.add_node(node3)
+G.add_node(node4)
 
 initialSelection(G)
 
-for n in G.nodes:
-    print(
-        "Node:", n,
-        "Neighbours:", [x[0] for x in G.nodes[n]["neighbours"]],
-        "Twait:", G.nodes[n]["twait"]
-    )
+for node in G:
+    print(node.state)
+# createClusters(G)
+
+
+
