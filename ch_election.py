@@ -213,14 +213,14 @@ def find_closest_CH(node):
     pass
 
 # Create new TDMA schedule for children
-def create_TDMA_schedule(node):
-    slot = 0
+# def create_TDMA_schedule(node):
+#     slot = 0
 
-    for child in node["chdList"]:
-        node["chdList"][child] = slot
-        slot+=1
+#     for child in node["chdList"]:
+#         node["chdList"][child] = slot
+#         slot+=1
 
-    return node
+#     return node
 
 # G = nx.Graph()
 # G.add_node(100, id=100, parent=-1, chdList={0:1}, state=1, energy=10, pos=[1,0])

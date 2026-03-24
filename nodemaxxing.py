@@ -76,13 +76,13 @@ def createClusters(graph):
             bsCoords = node.coords
             print(bsCoords)
             continue
-        if(node.parent == None):
+        if(node.parent.node == None):
             node.broadcast(message={
                 "type": "BROADCAST",
                 "sender": node.id,
                 "state": NodeType.CLUSTER_HEAD})
         # already has a CH parent, making it a SubCH
-        elif (node.parent.state != None):
+        elif (node.parent.node.state != None):
             node.broadcast(message={
                 "type": "BROADCAST",
                 "state": NodeType.SUBCLUSTER_HEAD})
@@ -107,7 +107,7 @@ def createClusters(graph):
                 "type": "CHROUTE",
                 "distance" : bsDist})
 
-        if node.parent != None:
+        if node.parent.node != None:
             node.broadcast(message = {
                 "type": "MEMBERJOIN",
                 "id": node.id,

@@ -34,8 +34,16 @@ class Child:
     """A node that sends packets to its parent. Seen from the view of the parent."""
     state: NodeType
     tdma_slot: int = -1    # -1 means no slot given
-    received: bool = False
+    # received: bool = False
     overall_score: float = 0
+    L: int = 0
+    N: int = 0
+
+class Action(Enum):
+    SEND_DATA = auto()
+    SEND_DATA_ACK = auto() 
+    IDLE = auto()
+    ELECTION = auto()
 
 class Node:
     def __init__(self, id, power=100, coords=[0,0]):
@@ -43,7 +51,8 @@ class Node:
         self.state = None
         self.power = power
         self.coords = coords
-        self.worthiness = 100
+        self.worthiness = 1
+        self.overall_score = 1
         self.timeSlot = 0
         self.currentBSDist = 1000000000
 
@@ -51,16 +60,15 @@ class Node:
         self.neighbourList = []
         # twait is effected by neighbours within the RC, but broadcast messages can reach 3/2 x RC 
         self.broadcastList = []
-        self.parent = None
-        self.parentScore = None
+        self.parent = Parent()
 
         self.twait = 0
 
         self.label=f"Node {self.id}"
       
-        self.sent = False
-        self.p_rcvd = False
-        self.timer = 0
+        self.action = Action.IDLE
+        self.pkt = None
+        self.timer = -1
         self.tdmaSlot = -1  # Default to -1 to represent no slot
         self.totalSlots = -1  # Default to -1 to represent no slot
         self.waiting = 0
@@ -76,7 +84,7 @@ class Node:
             for neighbour, dist in self.broadcastList:
                 neighbour.receive(self, message, 1)
         if(message['type'] == "MEMBERJOIN"):
-            self.parent.receive(self, message, -1)
+            self.parent.node.receive(self, message, -1)
 
         if(message['type'] == "CHROUTE"):
             for neighbour, dist in self.neighbourList:
@@ -85,7 +93,7 @@ class Node:
     def receive(self, sender, message, neighbourType):
         # direct neighbour   
         if message["type"] == "BROADCAST" and neighbourType == 0:
-            self.parent = sender
+            self.parent.node = sender
             # makes it a SubCH
             if message['state'] == NodeType.CLUSTER_HEAD:
                 self.state = NodeType.SUBCLUSTER_HEAD
@@ -96,7 +104,7 @@ class Node:
          # in broadcast range, no parent
         if message["type"] == "BROADCAST" and neighbourType == 1 and self.state == None:
             # IR state
-            self.parent = sender
+            self.parent.node = sender
             self.state = NodeType.IRRESOLUTE
 
         if message["type"] == "MEMBERJOIN":
@@ -112,7 +120,7 @@ class Node:
                 
         if message["type"] == "CHRETURN":
             if message.dist > self.currentBSDist:
-                self.parent = sender
+                self.parent.node = sender
 
         
     def addNeighbour(self, node):
@@ -148,3 +156,10 @@ class Node:
             else:
                 consumption = (len(self.childList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT + EnergyConsumption.ENERGY_DA) + EnergyConsumption.EPSILON_AMP * k * d^4
         self.energy -= consumption
+
+@dataclass
+class Parent:
+    node: Node = None
+    L: int = 0
+    N: int = 0
+    overall_score: float = 0
