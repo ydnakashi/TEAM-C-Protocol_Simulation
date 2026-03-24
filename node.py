@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum, auto
 import math
+import sys
 
 class NodeType(Enum):
     IRRESOLUTE = 4
@@ -23,11 +24,10 @@ STATE_STYLE: dict[NodeType, tuple[str, float, int]] = {
 }
 
 class EnergyConsumption(Enum): # All in nanojoules
-    ENERGY_PER_BIT = 50
-    ON_CONSUMPTION = auto()
-    S_CH_CONSUMPTION = auto()
-    CH_CONSUMPTION = auto()
-    BASE_STATION_CONSUMPTION = auto()
+    ENERGY_PER_BIT = 50 # nj/bit
+    EPSILON_FS = 0.01   # nj/bit/m^2
+    ENERGY_DA = 5 # nj/bit/signal
+    EPSILON_AMP = 0.0000013 # nj/bit/m^4
 
 @dataclass
 class Child:
@@ -38,7 +38,7 @@ class Child:
     overall_score: float = 0
 
 class Node:
-    def __init__(self, id, power=100, coords=[0,0]):
+    def __init__(self, id, power=100.0, coords=[0,0], Rc=2):
         self.id = id
         self.state = None
         self.power = power
@@ -48,13 +48,17 @@ class Node:
         self.currentBSDist = 1000000000
 
         self.chdList = {}
-        self.neighbourList = []
+        self.neighbourList: list[tuple(int, float)] = []
+        # self.neighbourList: dict[int, (float, float)] = {}
+        # self.neighbourListOrder: list[int] = []
         # twait is effected by neighbours within the RC, but broadcast messages can reach 3/2 x RC 
-        self.broadcastList = []
+        self.broadcastList: list[tuple(int, float)] = []
+        self.formerIRList: list[int] = []
         self.parent = None
         self.parentScore = None
 
         self.twait = 0
+        self.Rc = Rc
 
         self.label=f"Node {self.id}"
       
@@ -69,35 +73,63 @@ class Node:
         # print(f"Node {self.id} received:", message)
 
         # get all nodes within the Rc distance
-        if(message['type'] == "BROADCAST"):
+        if(message['type'] == "STATE"):
             for neighbour, dist in self.neighbourList:
                 neighbour.receive(self, message, 0)
-
-            for neighbour, dist in self.broadcastList:
-                neighbour.receive(self, message, 1)
+                self.consume_energy(sys.getsizeof(message), dist)
+            if self.state == NodeType.CLUSTER_HEAD:
+                for neighbour, dist in self.broadcastList:
+                    neighbour.receive(self, message, 1)
+                    self.consume_energy(sys.getsizeof(message), dist)
         if(message['type'] == "MEMBERJOIN"):
             self.parent.receive(self, message, -1)
-
         if(message['type'] == "CHROUTE"):
             for neighbour, dist in self.neighbourList:
                 neighbour.receive(self, message, -1)
+                self.consume_energy(sys.getsizeof(message), dist)
 
     def receive(self, sender, message, neighbourType):
+        # helper function
+        def find_index_by_senderId(tuples_list, first_elem):
+            for i, t in enumerate(tuples_list):
+                if t[0] == first_elem:
+                    return i
+            return -1
+
         # direct neighbour   
-        if message["type"] == "BROADCAST" and neighbourType == 0:
-            self.parent = sender
-            # makes it a SubCH
-            if message['state'] == NodeType.CLUSTER_HEAD:
-                self.state = NodeType.SUBCLUSTER_HEAD
-            else:
-                # ordinary node
-                self.state = NodeType.ORDINARY
+        if message["type"] == "STATE":
+            # float latest STATE message sender to top
+            senderId = message["sender"]
+            index = None
+            if senderId in [t[0] for t in self.neighbourList]:
+                index = find_index_by_senderId(self.neighbourList, senderId)                        
+            elif senderId in [t[0] for t in self.broadcastList]:
+                index = find_index_by_senderId(self.broadcastList, senderId)
+            if index != None or index > 0:
+                tup = self.neighborList.pop(index)
+                self.neighborList.insert(0, tup)
+                if message["state"] == NodeType.IRRESOLUTE:
+                    self.formerIRList.insert(0, senderId)
+
+            # Assign self state
+            if self.state == None:
+                if neighbourType == 0: # within sender Rc
+                    if message['state'] == NodeType.CLUSTER_HEAD:
+                        self.state = NodeType.SUBCLUSTER_HEAD
+                        self.broadcast(message={
+                            "type": "STATE",
+                            "sender": self.id,
+                            "state": NodeType.SUBCLUSTER_HEAD})
+                    elif message['state'] == NodeType.SUBCLUSTER_HEAD:
+                        self.state = NodeType.ORDINARY
+                else:
+                    self.state = NodeType.IRRESOLUTE
         
-         # in broadcast range, no parent
-        if message["type"] == "BROADCAST" and neighbourType == 1 and self.state == None:
-            # IR state
-            self.parent = sender
-            self.state = NodeType.IRRESOLUTE
+        # # in broadcast range, no parent
+        # if message["type"] == "BROADCAST" and neighbourType == 1 and self.state == None:
+        #     # IR state
+        #     self.parent = sender
+        #     self.state = NodeType.IRRESOLUTE
 
         if message["type"] == "MEMBERJOIN":
             self.chdList[message['id']] = Child(state=message['state'])
@@ -138,13 +170,12 @@ class Node:
 
     def consume_energy(self, k: int, d: float) -> None:
         consumption = 0.0
-        if self.nodeType == NodeType.ORDINARY:
-            consumption = EnergyConsumption.ENERGY_PER_BIT * k + EnergyConsumption.EPSILON_FS * k * d^2
-        elif self.nodeType == NodeType.BASE_STATION:
+        if self.nodeType == NodeType.BASE_STATION:
             consumption = 0
+        elif self.NodeType == NodeType.CLUSTER_HEAD:
+            consumption = (len(self.childList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT + EnergyConsumption.ENERGY_DA) + EnergyConsumption.EPSILON_FS * k * d^2
+        elif self.NodeType == NodeType.SUBCLUSTER_HEAD:
+            consumption = (len(self.childList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT + EnergyConsumption.ENERGY_DA) + EnergyConsumption.EPSILON_AMP * k * d^4
         else:
-            if (d < EnergyConsumption.DISTANCE_LIMIT):
-                consumption = (len(self.childList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT + EnergyConsumption.ENERGY_DA) + EnergyConsumption.EPSILON_FS * k * d^2
-            else:
-                consumption = (len(self.childList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT + EnergyConsumption.ENERGY_DA) + EnergyConsumption.EPSILON_AMP * k * d^4
+            consumption = EnergyConsumption.ENERGY_PER_BIT * k + EnergyConsumption.EPSILON_FS * k * d^2
         self.energy -= consumption

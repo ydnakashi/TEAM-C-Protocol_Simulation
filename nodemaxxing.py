@@ -29,11 +29,15 @@ def initialSelection(graph, Rc=1, alpha=0.5):
             dist = math.sqrt((x1-x2)**2 + (y1-y2)**2)
             # print("distance: ", dist)
 
-            if dist <= Rc:
-                node.neighbourList.append((other, dist))
+            if dist <= (3/2) * Rc:
+                node.neighbourList[other.id] = other.coords
+                node.neighbourListOrder.insert(0, other.id)
+
+            # if dist <= Rc:
+            #     node.neighbourList.append((other, dist))
             # only nodes that are within the multipled distance but outside of Rc are added
-            elif dist <= (3/2) * Rc:
-                node.broadcastList.append((other, dist))
+            # elif dist <= (3/2) * Rc:
+            #     node.broadcastList.append((other, dist))
                 
 
     # nodes to cluster ratio
@@ -61,7 +65,7 @@ def initialSelection(graph, Rc=1, alpha=0.5):
             twait = alpha * (ICDi / Rc) + (1 - alpha) * \
                 (1 - (NNi / N))
         node.twait = twait
-    createClusters(graph)
+    # createClusters(graph)
 
 def createClusters(graph):
     print("starting clusters")
@@ -71,50 +75,46 @@ def createClusters(graph):
     # no broadcast received - send out a CH message
     for n in sortedNodes:
         node = graph.nodes[n]["node"]
-        if(node.state == "BASE_STATION"): 
+        if node.state == NodeType.BASE_STATION: 
             print("bs")
             bsCoords = node.coords
             print(bsCoords)
             continue
-        if(node.parent == None):
+        elif node.state == None:
+            node.state = NodeType.CLUSTER_HEAD
             node.broadcast(message={
-                "type": "BROADCAST",
+                "type": "STATE",
                 "sender": node.id,
                 "state": NodeType.CLUSTER_HEAD})
-        # already has a CH parent, making it a SubCH
-        elif (node.parent.state != None):
+        elif node.state == NodeType.IRRESOLUTE:
+            node.state = NodeType.CLUSTER_HEAD
             node.broadcast(message={
-                "type": "BROADCAST",
-                "state": NodeType.SUBCLUSTER_HEAD})
-     
+                "type": "STATE",
+                "sender": node.id,
+                "state": NodeType.IRRESOLUTE})
+
     for n in sortedNodes:
         node = graph.nodes[n]["node"]
-        # if it is still an IR at the end, make it a CH
-        if node.state == NodeType.IRRESOLUTE:
-            node.state = NodeType.CLUSTER_HEAD
-        # make it a CH if it still has no parent
-        elif node.state == None: 
-            node.state = NodeType.CLUSTER_HEAD
-
-    
         # find nearest CH to the BS to get CH to CH routing
-
+        nodeList = []
         if node.state == NodeType.CLUSTER_HEAD:
-            # assuming BS is [0, 0]
-
-            bsDist = math.sqrt((node.coords[0]-0)**2 + (node.coords[1] -0)**2)
-            node.broadcast(message={
-                "type": "CHROUTE",
-                "distance" : bsDist})
-
-        if node.parent != None:
-            node.broadcast(message = {
-                "type": "MEMBERJOIN",
-                "id": node.id,
-                "state": node.state,
-                "coords": node.coords
-            })
-    
+            nodeList = [t for t in node.broadcastList if t[0] in node.formerIRList] if node.formerIRList else node.broadcastList
+        else:
+            nodeList = node.neighbourList
+        
+        # assuming BS is [0, 0]
+        for ch in nodeList:
+            newNode = graph.nodes[ch]["node"]
+            newParentDist = math.sqrt((newNode.coords[0]-0)**2 + (newNode.coords[1] -0)**2)
+            oldParentDist = None if node.parent == None else math.sqrt((node.oarent.coords[0]-0)**2 + (node.parent.coords[1]-0)**2)
+            if newParentDist < oldParentDist or oldParentDist == None:
+                node.parent = newNode
+                node.broadcast(message = {
+                    "type": "MEMBERJOIN",
+                    "id": node.id,
+                    "state": node.state,
+                    "coords": node.coords
+                })
     
 
 # G = nx.Graph()
