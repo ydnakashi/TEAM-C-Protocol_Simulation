@@ -33,10 +33,11 @@ import random
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any
+import copy
 
 import networkx as nx
 # from network_node import *
-from node import Child, Node, NodeType
+from node import Child, Node, NodeType, Parent, Action
 from nodemaxxing import initialSelection
 
 # ──────────────────────────────────────────────
@@ -139,7 +140,9 @@ class NetworkModel:
         self._active: list[Node] = []
         self._tdma_slot: int = 0
         self._phase: Phase = Phase.INIT_ROLES  # Change this 
-        self._loss_interval: int = 3   # change this later
+        self._loss_interval: int = 6   # change this later
+        self._destroyed_prob: dict = {}
+        self._destroyed: list[int] = []
 
     # ── Properties ───────────────────────────
     @property
@@ -302,6 +305,12 @@ class NetworkModel:
     def get_ordinary_nodes(self) -> list[int]:
         pass
 
+    def init_actions(self):
+        # Send data if no children
+        for ni in self._graph.nodes():
+            if (len(self._graph.nodes[ni]["node"].chdList) == 0):
+                self._graph.nodes[ni]["node"].action = Action.SEND_DATA
+
     def create_TDMA_schedule(self, node):
         """Create TDMA schedule for node's children"""
         slot = 0
@@ -314,28 +323,77 @@ class NetworkModel:
         self._graph.nodes[node]["node"].waiting = total  # Total time slots
         self._graph.nodes[node]["node"].timer = -1  # max time to wait before declaring lost packet
 
+    def spawn_TDMA_packets(self, parent):
+        """Spawn packets to inform children of their TDMA slot"""
+        for child in self._graph.nodes[parent]["node"].chdList:
+            # Pass the schedule to the children
+            schedule = {id: c.tdma_slot for id, c in self._graph.nodes[parent]["node"].chdList.items()}
+            msg = {
+                "schd": schedule,
+                "tt": self._graph.nodes[parent]["node"].waiting,
+                "type": "MEMBERACK"   
+            }
+            pkt = self.spawn_packet(msg, parent, child)
+
     def update_TDMA_slot(self, node: int, slot: int, total_slots: int):
         """Record TDMA schedule information when received by parent."""
         self._graph.nodes[node]["node"].tdmaSlot = slot
         self._graph.nodes[node]["node"].totalSlots = total_slots
         return node
+    
+    def calculate_worthiness_score(self, L, N, c=1):
+        if(N==0): return 0
+        t = L/N
+        r = 1 - (((12*L*(N-L))**0.5) / ((N+1)*N))
+        w = 1 - (((t-1)**2 + (c**2) * (r-1)**2)**0.5 / (1+c**2)**0.5)
+        return w
+    
+    def init_destruction_probabilities(self, max=40):
+        """Initialize destruction probabilities (0-100) for each node"""
+        for ni in self.get_source_nodes():
+            self._destroyed_prob[ni] = random.randrange(0, max)
+        print(self._destroyed_prob)
 
-    def spawn_packet(self, content: dict | None = {}, source: int | None = None, dest: int | None = None) -> Packet | None:
+    def destroy_nodes(self):
+        """Randomly destroy nodes based on their probabilities"""
+        new_destroyed = []
+        for ni, prob in self._destroyed_prob.items():
+            if (random.randrange(0, 100)) < prob and (ni not in self._destroyed):
+                self._destroyed.append(ni)
+                self._graph.nodes[ni]["node"].timer = -1
+                new_destroyed.append(ni)
+                # self._graph.nodes[ni]["node"] = Node(ni)  # wipe the data
+        print("destroyed: ", self._destroyed)
+        self._events.append(f"Destroyed nodes: {new_destroyed}")
+
+    def reset_routing(self):
+        for ni in self._graph.nodes:
+            node = self._graph.nodes[ni]["node"]
+            # node.sent = False
+            node.waiting = len(node.chdList)
+            node.timer = self._loss_interval * node.waiting
+            # for ci, child in node.chdList.items():
+            #     child.received = False
+
+        self._graph.nodes[self._base_station]["node"].waiting = len(self._graph.nodes[self._base_station]["node"].chdList)
+
+    def init_TDMA(self):
+        parents = self.get_parent_nodes()
+        for parent in parents:
+            self.create_TDMA_schedule(parent)  # Create TDMA schedules for all children
+            self.spawn_TDMA_packets(parent)
+    
+    def redo_edges(self):
+        self._graph.clear_edges()
+        for parent in self.get_parent_nodes():
+            for child in self._graph.nodes[parent]["node"].chdList:
+                self._graph.add_edge(parent, child)
+
+    def spawn_packet(self, content: dict, source: int, dest: int) -> Packet | None:
         """
         Create a packet at *source* (random if None) routed to base
         via nx.shortest_path.  Returns the Packet or None.
         """
-        # sources = self.get_source_nodes()
-        # if not sources:
-        #     return None
-        # if source is None:
-        #     source = random.choice(sources)
-        # elif source not in sources:
-        #     return None
-
-        if dest is None:
-            dest = self._base_station
-
         pkt = Packet(
             packet_id=self._next_packet_id,
             source=source,
@@ -349,113 +407,14 @@ class NetworkModel:
         if pkt:
             route_str = " → ".join(str(n) for n in pkt.path)
             self._events.append(
-                f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} "
+                f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} {pkt.content["type"]} "
                 f"spawned at Node {pkt.source}   route: {route_str}"
             )
         return pkt
 
-    def tick(self) -> SimulationSnapshot:
-        """
-        Advance one discrete time step.
-          1. Auto-spawn packets on interval
-          2. Interpolate each in-transit packet forward
-          3. Snap to next hop when progress >= 1
-          4. Mark DELIVERED when base station reached
-        """
-        self._tick += 1
-        self._events = []
-        SPEED = 0.20        # fraction-of-hop per tick
-        nodes = self.get_source_nodes()
-        delivered = [p for p in self._packets if p.is_delivered]
+    def move_packets(self):
+        SPEED = 0.10  # fraction-of-hop per tick
 
-        # Routing phase
-        if(self._phase == Phase.ROUTING and len(delivered) == len(self._packets)):
-            print("routing")
-            # Change to next phase if routing is finished
-            if(self._graph.nodes[self._base_station]["node"].waiting == 0):  # Add a variable that tracks how many children sent packets? issue with lost packets, might need a counter per CH for how long to wait until marking it as lost and to move on
-                self._phase = Phase.ELECTION
-                self._graph.nodes[self._base_station]["node"].waiting = len(self._graph.nodes[self._base_station]["node"].chdList)  # reset back to # of children
-
-            # Continue routing when all packets have made it to next-hop
-            elif (self._tick % self._spawn_interval == 0):
-                
-                self._tdma_slot+=1  # Start a new TDMA slot if all packets reached the next-hop
-
-                # ── Create packets ───────────────────────
-                for ni in self._graph.nodes():
-                    node = self._graph.nodes[ni]["node"]
-
-                    if(node.timer == 0):
-                        if(node.sent):
-                            if(not node.p_rcvd):
-                                print("Bad parent: ")
-                        else:
-                            for i, child in node.chdList.items():
-                                if(not child.received):
-                                    print("Bad node: ", child)
-                                    # update its L and N or something??
-                                    # update attributes to allow it to send its own packet to its parent
-                    
-                    # Create packet during its TDMA slot if it hasn't sent it yet
-                    elif node != self._base_station and not node.sent and node.waiting == 0 and \
-                       self._tdma_slot % node.totalSlots == node.tdmaSlot:
-
-                        msg = {
-                            "type": "DATA_MSG"
-                        }
-                        pkt = self.spawn_packet(msg, node, node.parent.id)
-                        node.sent = True
-                        node.timer = self._loss_interval  # Set timer for ACK packet to be returned from parent
-
-                    # only decrease timer after the first receipt of a packet
-                    if(node.timer!=-1): node.timer -= 1
-        
-        # Init phase
-        elif (self._phase == Phase.INIT_ROLES):
-            initialSelection(self._graph)
-            for n in self._graph.nodes():
-                print(self.graph.nodes[n]["node"].id, self.graph.nodes[n]["node"].state, self.graph.nodes[n]["node"].parent, self.graph.nodes[n]["node"].chdList)
-
-            # Loop through all parents
-            # if (self._tick % self._spawn_interval == 0):
-            parents = self.get_parent_nodes()
-            for parent in parents:
-                self.create_TDMA_schedule(parent)  # Create TDMA schedules for all children
-
-                for child in self._graph.nodes[parent]["node"].chdList:
-                    # Pass the schedule to the children
-                    schedule = {id: c.tdma_slot for id, c in self._graph.nodes[parent]["node"].chdList.items()}
-                    msg = {
-                        "schd": schedule,
-                        "tt": self._graph.nodes[parent]["node"].waiting,
-                        "type": "PREQ_ACK"   
-                    }
-                    pkt = self.spawn_packet(msg, parent, child)
-
-            self._graph.clear_edges()
-            for parent in self.get_parent_nodes():
-                for child in self._graph.nodes[parent]["node"].chdList:
-                    self._graph.add_edge(parent, child)
-
-            for n in self._graph.nodes():
-                print(self.graph.nodes[n]["node"].id, self.graph.nodes[n]["node"].chdList)          
-              
-            self._phase = Phase.ROUTING
-
-
-        # S_CH/CH election
-        elif(self._phase == Phase.ELECTION):
-            # loop through all nodes to determine if it needs to update itself or if it's orphaned
-            for node in self._graph.nodes():
-                pass
-            # check if parent is still good (overall score above a threshold) --> observe_parent_potential
-            # if it is and it's an ON, do nothing.
-            # call elect_new_head
-            # if returned nothing, do nothing.
-            # else, send a packet with the message to all its children + parent
-            # on delivery, children and parent call child_update_new_head or update_no_head
-
-        # ── Move packets ─────────────────────
         for pkt in self._packets:
             if pkt.status != PacketStatus.IN_TRANSIT:
                 continue
@@ -477,22 +436,132 @@ class NetworkModel:
                         f"DELIVERED → Node {pkt.destination}"
                     )
 
+                    node = self._graph.nodes[pkt.destination]["node"]
+                    if(pkt.destination in self._destroyed): continue  # destroyed node cannot receive packets
+
                     if(pkt.content["type"] == "DATA_MSG"):
-                        if(self._graph.nodes[pkt.destination]["node"].timer == -1):
-                            self._graph.nodes[pkt.destination]["node"].timer = self._loss_interval * self._graph.nodes[pkt.destination]["node"].waiting
+                        # node.chdList[pkt.source].received = True
+                        node.action = Action.SEND_DATA_ACK  # send ACK back
+                        node.pkt = pkt
 
-                        self._graph.nodes[pkt.destination]["node"].waiting-=1 
-                        self._graph.nodes[pkt.destination]["node"].chdList[pkt.source].received = True
-
-                        self.spawn_packet({"type": "DATA_ACK"}, pkt.destination, pkt.source)  # Send ACK back
-
-                    elif(pkt.content["type"] == "PREQ_ACK"):  # Update node's tdma slot received
-                        self._graph.nodes[pkt.destination]["node"].tdmaSlot = pkt.content["schd"][pkt.destination]
-                        self._graph.nodes[pkt.destination]["node"].totalSlots = pkt.content["tt"]
+                    elif(pkt.content["type"] == "MEMBERACK"):  # Update node's tdma slot received
+                        # node.tdmaSlot = pkt.content["schd"][pkt.destination]
+                        # node.totalSlots = pkt.content["tt"]
+                        self.update_TDMA_slot(pkt.destination, pkt.content["schd"][pkt.destination], pkt.content["tt"])
 
                     elif(pkt.content["type"] == "DATA_ACK"):
-                        self._graph.nodes[pkt.destination]["node"].p_rcvd = True
-                        # Update worthiness score for parent
+                        # node.p_rcvd = True
+                        node.parent.L += 1
+                        node.action = Action.ELECTION
+
+                    elif(pkt.content["type"] == "UPDATE_HEAD"):
+                        self.update_new_head(pkt.destination, pkt.content)
+                        # if(node.parent.node == None): print(node.id, node.parent, node.chdList)
+                        # else: print(node.id, node.parent.node.id, node.chdList)
+                        self.redo_edges()
+                        node.action = Action.IDLE
+                    
+                    elif(pkt.content["type"] == "UPDATE_NOHEAD"):
+                        self.update_no_head(pkt.destination, pkt.content)
+                        # if(node.parent.node == None): print(node.id, node.parent, node.chdList)
+                        # else: print(node.id, node.parent.node.id, node.chdList)
+                        self.redo_edges()
+                        node.action = Action.IDLE
+
+    def send_data_packet(self, ni):
+        node = self._graph.nodes[ni]["node"]
+
+        node.parent.node.chdList[ni].N += 1  # parent observes that the child should be sending a packet in this time slot
+
+        if (ni not in self._destroyed):
+            node.parent.N += 1
+
+            msg = {
+                "type": "DATA_MSG"
+            }
+            pkt = self.spawn_packet(msg, ni, node.parent.node.id)
+            # node.sent = True
+            node.action = Action.IDLE
+            node.timer = self._loss_interval  # Set timer for ACK packet to be returned from parent
+
+    def send_data_ack(self, pkt):
+        node = self._graph.nodes[pkt.destination]["node"]
+        if(node.timer == -1):
+            node.timer = self._loss_interval * node.waiting
+
+        node.waiting-=1 
+        self.spawn_packet({"type": "DATA_ACK"}, pkt.destination, pkt.source)
+        node.chdList[pkt.source].L += 1
+
+        if(node != self._base_station and (node.waiting == 0 or node.timer == 0)):
+            node.action = Action.SEND_DATA
+        else:
+            node.action = Action.IDLE
+
+    def send_election_msg(self, ni, msg):
+        for ci in msg["chdList"]:
+            self.spawn_packet(msg, ni, ci)
+            # print("children")
+            # print(ci, self._graph.nodes[ci]["node"].parent.node.id, self._graph.nodes[ci]["node"].state)
+        
+        self.spawn_packet(msg, ni, self._graph.nodes[ni]["node"].parent.node.id)
+        # print(self._graph.nodes[ni]["node"].parent.node.id, self._graph.nodes[ni]["node"].parent.node.state)
+
+    def tick(self) -> SimulationSnapshot:
+        """
+        Advance one discrete time step.
+          1. Auto-spawn packets on interval
+          2. Interpolate each in-transit packet forward
+          3. Snap to next hop when progress >= 1
+          4. Mark DELIVERED when base station reached
+        """
+        self._tick += 1
+        self._events = []
+        # nodes = self.get_source_nodes()
+        # delivered = [p for p in self._packets if p.is_delivered]
+
+        if (self._tick % self._spawn_interval == 0):
+
+            if(self._phase == Phase.INIT_ROLES):
+                initialSelection(self._graph)
+                self.init_TDMA()
+                self.redo_edges()
+
+                self.init_destruction_probabilities()
+                self.init_actions()
+                self._phase = Phase.ROUTING
+
+            else:
+                self._tdma_slot+=1  # Start a new TDMA slot if all packets reached the next-hop
+
+                for ni in self._graph.nodes():
+                    node = self._graph.nodes[ni]["node"]
+
+                    # Send data packet during your TDMA time slot
+                    if (node != self._base_station) and (node.action == Action.SEND_DATA) and \
+                        (self._tdma_slot % node.totalSlots == node.tdmaSlot):
+
+                        self.send_data_packet(ni)
+                    
+                    # Send ACK back to child when they send their data packet
+                    elif (node.action == Action.SEND_DATA_ACK and node.pkt):
+                        self.send_data_ack(node.pkt)
+
+                    # Determine to re-elect head or not
+                    elif (node.action == Action.ELECTION):
+                        if(len(node.chdList) == 0): continue
+                        
+                        msg = self.elect_new_head(ni, 10)   # Random threshold for now
+                        if msg == None: continue
+                        # print(msg)
+                        self.send_election_msg(ni, msg)
+                        node.action = Action.IDLE
+                        # self.update_old_head(node, msg)
+
+                    
+                        
+
+        self.move_packets()
 
         self._active = [p for p in self._packets if p.status == PacketStatus.IN_TRANSIT]
 
@@ -505,6 +574,183 @@ class NetworkModel:
             active_count=len(self._active),
             events=list(self._events),
         )
+    
+    def dist(self, a, b):
+        x1, y1 = a["pos"]
+        x2, y2 = b["pos"]
+        return ((x1-x2)**2 + (y1-y2)**2)** 0.5
+
+    # Current CH or S_CH enters the head update phase
+    def elect_new_head(self, ni, Eth):
+        node = self._graph.nodes[ni]["node"]
+        state = node.state.value
+        o_score = node.worthiness
+
+        if (o_score > Eth): return  # do not update if energy is still high
+
+        children = node.chdList
+
+        # Choose a node within the children that fit the criteria
+        candidates = [
+            self._graph.nodes[child] for child in children
+            if self._graph.nodes[child]["node"].state.value == state+1 and self._graph.nodes[child]["node"].overall_score> Eth
+        ]
+        # and self._graph.nodes[child]["node"].overall_score
+
+        if candidates:
+            new_head = min(candidates, key= lambda c: self.dist(node, c))  # elect smallest distance node
+
+            # send UPDATE_HEAD with ID of new head, ChdList, ID of this node, parent ID, type of msg
+            UPDATE_HEAD = {
+                "newHead": new_head,
+                "chdList": copy.deepcopy(node.chdList),
+                "oldHead": node.id,
+                "oldParent": copy.deepcopy(node.parent.node),
+                "type": "UPDATE_HEAD"
+            }
+
+            # delete chdList
+            node.chdList = {}
+                
+            # update parent to new head
+            node.parent.node = self._graph.nodes[new_head]["node"]
+            # update state
+            node.state = NodeType(node.state.value + 1)
+
+            return UPDATE_HEAD
+
+        # send UPDATE_NOHEAD with ChdList and parent ID, NodeID, type
+        UPDATE_NOHEAD = {
+            "chdList": copy.deepcopy(node.chdList),
+            "oldHead": node.id,
+            "newHead": node.parent.node.id,
+            "type": "UPDATE_NOHEAD"
+        }
+        print(UPDATE_NOHEAD["chdList"])
+
+        # delete ChdList
+        node.chdList = {}
+        print(UPDATE_NOHEAD["chdList"])
+
+        return UPDATE_NOHEAD # no possible candidates
+
+    # Elect new head within orphaned nodes
+    def elect_new_head_orphans(self, ni, msg, Eth):
+        node = self._graph.nodes[ni]["node"]
+        # Choose a node within the children that fit the criteria
+        candidates = [
+            self._graph.nodes[child] for child in msg["chdList"]
+            if self._graph.nodes[child]["node"].state.value == (node.state.value)+1 > Eth
+        ]
+        # and self._graph.nodes[child]["node"].overall_score 
+
+        if candidates:
+            new_head = min(candidates, key= lambda c: self.dist(node, c))  # elect smallest distance node
+            
+            # add the new head to chdList
+            node.chdList[new_head] = Child(state=self._graph.nodes[new_head]["node"].state)
+            # TDMA schedule (use the one from network model)
+            node = self.create_TDMA_schedule(node)
+
+            # send UPDATE_HEAD_ORPHAN with ID of new head, ChdList, ID of this node, parent ID, type of msg
+            UPDATE_HEAD_ORPHAN = {
+                "newHead": new_head,
+                "chdList": msg["chdList"],
+                "oldHead": node.id,
+                "oldParent": node.parent.node.id,
+                "type": "UPDATE_HEAD_ORPHAN"
+            }
+
+            return UPDATE_HEAD_ORPHAN
+
+        # else, keep them all as children
+        node.chdList.update(msg["chdList"])
+        # TDMA schedule
+        node = self.create_TDMA_schedule(ni)
+        self.spawn_TDMA_packets(ni) 
+
+        return None  # no possible candidates
+
+    # Nodes update themselves when receiving UPDATE_HEAD or UPDATE_HEAD_ORPHANED message
+    def update_new_head(self, ni, msg):
+        node = self._graph.nodes[ni]["node"]
+        # If this is the new head, update itself as parent
+        if (node.id == msg["newHead"]):
+            # update state to new state
+            node.state = NodeType(node.state.value - 1)
+            # if chdList is not empty, update the children state to state-1
+            chdList = node.chdList
+            if (len(chdList) > 0):
+                for child in chdList:
+                    self._graph.nodes[child]["node"].state = NodeType(self._graph.nodes[child]["node"].state.value - 1)
+                # then add the chdList from the message to its own list
+                node.chdList.update(msg["chdList"])
+                node.chdList[msg["oldHead"]] = node.chdList[ni]  # old head takes the time slot of the new head
+                del node.chdList[ni]
+
+            # if ChdList is empty, add ChdList
+            else:
+                node.chdList = msg["chdList"]
+                del node.chdList[node.id]
+
+            # Update parent of itself to parent in the message only if not orphaned
+            if (msg["type"] != "UPDATE_HEAD_ORPHAN"): 
+                node.parent = Parent()
+                node.parent.node = self._graph.nodes[msg["oldParent"]]["node"]
+
+        elif(node.id == msg["oldParent"]):
+            # Take out old head and add new head to chdList
+            old_slot = node.chdList[msg["oldHead"]]
+            del node.chdList[msg["oldHead"]]
+            node.chdList[msg["newHead"]] = old_slot  # use the time slot of the old head
+
+        # If this is a child, update its parent to new head
+        else:
+            node.parent = Parent()
+            node.parent.node = self._graph.nodes[msg["newHead"]]["node"]
+
+        return node
+
+    # Any node that receives UPDATE_NOHEAD message udpates itself
+    def update_no_head(self, ni, msg):
+        node = self._graph.nodes[ni]["node"]
+        # if node is one of the children from the message, update its parent to the parent in the message
+        if(node.id in msg["chdList"]):
+            node.parent.node = self._graph.nodes[msg["newHead"]]["node"]
+            if(node.parent.node.state != self._graph.nodes[msg["oldHead"]]["node"].state):
+                node.state = NodeType(node.parent.node.state.value+1)
+
+        # if the node is the parent in the message, add the children to its chdList
+        elif(node.id == msg["newHead"]):
+            node.chdList.update(msg["chdList"].copy())
+            # Create new TDMA schedule
+            node = self.create_TDMA_schedule(ni)
+            self.spawn_TDMA_packets(ni)  # Broadcast MEMBERACK
+
+        return node
+
+    # Observe if parent is still viable during election phase
+    def observe_parent_potential(self, ni, Oth):
+        node = self._graph.nodes[ni]["node"]
+        # Check if parent overall score is greater than a threshold
+        if(self._graph.nodes[ni]["node"].parent.overall_score > Oth): return
+
+        # Parent is dead, move to closest CH
+        closest_CH = self.find_closest_CH(node)
+
+        # Set parent to closest_CH
+        node.parent.node = closest_CH
+
+        # Send REQUEST_PARENT message to new parent
+        REQUEST_PARENT = {
+            "child": node,
+            "type": "REQUEST_PARENT"
+        }
+
+        return REQUEST_PARENT
+
+    def find_closest_CH(self, node):
+        pass
 
     def get_packet_render_positions(
         self, layout: LayoutResult,
@@ -520,13 +766,12 @@ class NetworkModel:
             if pkt.status == PacketStatus.DROPPED:
                 continue
             if pkt.status == PacketStatus.DELIVERED:
-                bx, by = pos[self._base_station]
+                bx, by = pos[pkt.destination]
                 results.append((bx, by, pkt.packet_id, True))
                 continue
 
             cur = pkt.current_node
             nxt = pkt.next_node
-            print(nxt)
             if nxt is None:
                 cx, cy = pos[cur]
             else:
@@ -548,20 +793,20 @@ class NetworkModel:
                              if p.packet_id not in remove_ids]
 
     # ── Utility ──────────────────────────────
-    def summary(self) -> str:
-        s = self.get_stats()
-        conn = "connected" if s.is_connected else f"{s.num_components} components"
-        return f"Nodes: {s.num_nodes}  |  Edges: {s.num_edges}  |  {conn}"
+    # def summary(self) -> str:
+    #     s = self.get_stats()
+    #     conn = "connected" if s.is_connected else f"{s.num_components} components"
+    #     return f"Nodes: {s.num_nodes}  |  Edges: {s.num_edges}  |  {conn}"
 
-    def nx_functions_used(self) -> list[str]:
-        return [
-            "nx.Graph()", "G.add_node()", "G.add_edge()",
-            "G.remove_node()", "G.remove_edge()", "G.clear()",
-            "G.nodes()", "G.edges(data=True)",
-            "G.number_of_nodes()", "G.number_of_edges()",
-            "G.degree()", "G.neighbors()",
-            "nx.spring_layout()", "nx.get_edge_attributes()",
-            "nx.is_connected()", "nx.connected_components()",
-            "nx.shortest_path()", "nx.shortest_path_length()",
-            "nx.has_path()",
-        ]
+    # def nx_functions_used(self) -> list[str]:
+    #     return [
+    #         "nx.Graph()", "G.add_node()", "G.add_edge()",
+    #         "G.remove_node()", "G.remove_edge()", "G.clear()",
+    #         "G.nodes()", "G.edges(data=True)",
+    #         "G.number_of_nodes()", "G.number_of_edges()",
+    #         "G.degree()", "G.neighbors()",
+    #         "nx.spring_layout()", "nx.get_edge_attributes()",
+    #         "nx.is_connected()", "nx.connected_components()",
+    #         "nx.shortest_path()", "nx.shortest_path_length()",
+    #         "nx.has_path()",
+    #     ]

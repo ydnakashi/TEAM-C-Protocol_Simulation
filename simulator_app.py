@@ -570,8 +570,9 @@ class WirelessSimulator(tk.Tk):
         # ── Packets (animated dots) ──────────
         pkt_positions = self.model.get_packet_render_positions(layout)
         for px, py, pid, delivered in pkt_positions:
-            color = PKT_DELIVER if delivered else PKT_COLOR
-            size = 60 if delivered else 100
+            if delivered: continue
+            color = PKT_COLOR
+            size = 100
             ax.scatter(px, py, s=size, c=color, zorder=10,
                        edgecolors="#11111b", linewidths=1.0, alpha=0.9)
             ax.annotate(f"#{pid}", (px, py), fontsize=6,
