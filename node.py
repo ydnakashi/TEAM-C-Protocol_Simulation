@@ -52,8 +52,8 @@ class Node:
         self.power = power
         self.coords = coords
         self.worthiness = 1
-        self.overall_score = 1
-        self.timeSlot = 0
+        self.overall_score = 100
+        # self.timeSlot = 0
         self.currentBSDist = 1000000000
 
         self.chdList = {}
@@ -67,6 +67,7 @@ class Node:
         self.label=f"Node {self.id}"
       
         self.action = Action.IDLE
+        self.ready_to_send = False
         self.pkt = None
         self.timer = -1
         self.tdmaSlot = -1  # Default to -1 to represent no slot
