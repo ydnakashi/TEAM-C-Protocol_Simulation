@@ -38,7 +38,7 @@ import copy
 import networkx as nx
 # from network_node import *
 from node import Child, Node, NodeType, Parent, Action
-from nodemaxxing import initialSelection
+from nodemaxxing import *
 
 # ──────────────────────────────────────────────
 #  Data classes
@@ -434,7 +434,7 @@ class NetworkModel:
         if pkt:
             route_str = " → ".join(str(n) for n in pkt.path)
             self._events.append(
-                f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} {pkt.content["type"]} "
+                f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} {pkt.content['type']} "
                 f"spawned at Node {pkt.source}   route: {route_str}"
             )
         return pkt
@@ -605,7 +605,19 @@ class NetworkModel:
         if (self._tick % self._spawn_interval == 0):
 
             if(self._phase == Phase.INIT_ROLES):
-                initialSelection(self._graph)
+                twaitCalculation(self._graph)
+                stateSelection(self._graph)
+                clusterCreation(self._graph, self.base_station)
+
+                # for n in self._graph.nodes:
+                #     node = self._graph.nodes[n]["node"]
+                #     print(f"""
+                #         {node.id} - {node.state}:
+                #             Parent: {node.parent.node.id if node.parent.node != None else None}
+                #             Children: {node.chdList.keys()}
+                #     """
+                #     )
+
                 self.init_TDMA()
                 self.redo_edges()
 

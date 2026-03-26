@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum, auto
 import math
+import sys
 
 class NodeType(Enum):
     IRRESOLUTE = 4
@@ -23,11 +24,10 @@ STATE_STYLE: dict[NodeType, tuple[str, float, int]] = {
 }
 
 class EnergyConsumption(Enum): # All in nanojoules
-    ENERGY_PER_BIT = 50
-    ON_CONSUMPTION = auto()
-    S_CH_CONSUMPTION = auto()
-    CH_CONSUMPTION = auto()
-    BASE_STATION_CONSUMPTION = auto()
+    ENERGY_PER_BIT = 50.0 # nj/bit
+    EPSILON_FS = 0.01   # nj/bit/m^2
+    ENERGY_DA = 5.0 # nj/bit/signal
+    EPSILON_AMP = 0.0000013 # nj/bit/m^4
 
 @dataclass
 class Child:
@@ -48,23 +48,33 @@ class Action(Enum):
     AWAIT_REQS = auto()
 
 class Node:
-    def __init__(self, id, power=100, coords=[0,0]):
-        self.id = id
-        self.state = None
-        self.power = power
-        self.coords = coords
-        self.worthiness = 1
-        self.overall_score = 100
-        # self.timeSlot = 0
-        self.currentBSDist = 1000000000
+    # OLD VERSION - ONCE MERGED COMBINE THE TWO 
+    # def __init__(self, id, power=100, coords=[0,0]):
+    #     self.id = id
+    #     self.state = None
+    #     self.power = power
+    #     self.coords = coords
+    #     self.worthiness = 1
+    #     self.overall_score = 100
+    #     # self.timeSlot = 0
+    #     self.currentBSDist = 1000000000
+    def __init__(self, id, power=100.0, coords=[0,0], bsCoords=[0,0], Rc=2):
+        self.id: int = id
+        self.state: NodeType = None
+        self.power: float = power
+        self.coords: tuple(int, int) = coords
+        self.worthiness: float = 1
+        self.overall_score: float = 1
+        self.BScoords: tuple(int, int) = bsCoords # x, y
 
-        self.chdList = {}
-        self.neighbourList = []
-        # twait is effected by neighbours within the RC, but broadcast messages can reach 3/2 x RC 
-        self.broadcastList = []
+        self.chdList: dict[int, Child] = {}
+        self.neighbourList: list[tuple(Node, float)] = []   # <= Rc
+        self.broadcastList: list[tuple(Node, float)] = []   # <= 3/2*Rc
+        self.relayList: list[tuple(Node, float)] = []       # <= 3*Rc
         self.parent = Parent()
 
         self.twait = 0
+        self.Rc = Rc
 
         self.label=f"Node {self.id}"
       
@@ -82,35 +92,63 @@ class Node:
         # print(f"Node {self.id} received:", message)
 
         # get all nodes within the Rc distance
-        if(message['type'] == "BROADCAST"):
+        if(message['type'] == "STATE"):
             for neighbour, dist in self.neighbourList:
-                neighbour.receive(self, message, 0)
-
-            for neighbour, dist in self.broadcastList:
-                neighbour.receive(self, message, 1)
+                neighbour.receive(self, message)
+                self.consume_energy(sys.getsizeof(message), dist)
+            if self.state == NodeType.CLUSTER_HEAD:
+                for neighbour, dist in self.broadcastList:
+                    neighbour.receive(self, message)
+                    self.consume_energy(sys.getsizeof(message), dist)
         if(message['type'] == "MEMBERJOIN"):
-            self.parent.node.receive(self, message, -1)
+            self.parent.node.receive(self, message)
 
         if(message['type'] == "CHROUTE"):
             for neighbour, dist in self.neighbourList:
                 neighbour.receive(self, message, -1)
+                self.consume_energy(sys.getsizeof(message), dist)
 
-    def receive(self, sender, message, neighbourType):
+    def receive(self, sender, message):
+        # helper function
+        def find_index_by_senderId(tuples_list, first_elem):
+            for i, t in enumerate(tuples_list):
+                if t[0].id == first_elem:
+                    return i
+            return -1
+
+        def float_node(tuples_list, nodeId):
+            index = find_index_by_senderId(tuples_list, nodeId)
+            if index == -1:
+                return "floating failed"
+            tup = tuples_list.pop(index)
+            tuples_list.insert(0, tup)
+            return None
+
         # direct neighbour   
-        if message["type"] == "BROADCAST" and neighbourType == 0:
-            self.parent.node = sender
-            # makes it a SubCH
-            if message['state'] == NodeType.CLUSTER_HEAD:
-                self.state = NodeType.SUBCLUSTER_HEAD
-            else:
-                # ordinary node
-                self.state = NodeType.ORDINARY
-        
-         # in broadcast range, no parent
-        if message["type"] == "BROADCAST" and neighbourType == 1 and self.state == None:
-            # IR state
-            self.parent.node = sender
-            self.state = NodeType.IRRESOLUTE
+        if message["type"] == "STATE":
+            senderId = message["sender"]
+            if senderId in [t[0].id for t in self.neighbourList]:
+                # float latest STATE message sender to top to make sure former IR nodes are selected for parent CH
+                float_node(self.neighbourList, senderId)
+
+                # State selection
+                if self.state == None:
+                    if message['state'] == NodeType.CLUSTER_HEAD:
+                        self.state = NodeType.SUBCLUSTER_HEAD
+                        self.broadcast(message={
+                            "type": "STATE",
+                            "sender": self.id,
+                            "state": NodeType.SUBCLUSTER_HEAD})
+                    elif message['state'] == NodeType.SUBCLUSTER_HEAD:
+                        self.state = NodeType.ORDINARY
+
+            elif senderId in [t[0].id for t in self.broadcastList]:
+                # float latest STATE message sender to top to make sure former IR nodes are selected for parent CH
+                float_node(self.broadcastList, senderId)
+
+                # State selection
+                if self.state == None:
+                    self.state = NodeType.IRRESOLUTE
 
         if message["type"] == "MEMBERJOIN":
             self.chdList[message['id']] = Child(state=message['state'])
@@ -128,9 +166,6 @@ class Node:
                 self.parent.node = sender
 
         
-    def addNeighbour(self, node):
-        self.neighbourList.append(node)
-
     def neighbourCount(self):
         return len(self.neighbourList)
 
@@ -151,16 +186,15 @@ class Node:
 
     def consume_energy(self, k: int, d: float) -> None:
         consumption = 0.0
-        if self.nodeType == NodeType.ORDINARY:
-            consumption = EnergyConsumption.ENERGY_PER_BIT * k + EnergyConsumption.EPSILON_FS * k * d^2
-        elif self.nodeType == NodeType.BASE_STATION:
+        if self.state == NodeType.BASE_STATION:
             consumption = 0
+        elif self.state == NodeType.CLUSTER_HEAD:
+            consumption = (len(self.chdList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT.value + EnergyConsumption.ENERGY_DA.value) + EnergyConsumption.EPSILON_FS.value * k * d**2
+        elif self.state == NodeType.SUBCLUSTER_HEAD:
+            consumption = (len(self.chdList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT.value + EnergyConsumption.ENERGY_DA.value) + EnergyConsumption.EPSILON_AMP.value * k * d**4
         else:
-            if (d < EnergyConsumption.DISTANCE_LIMIT):
-                consumption = (len(self.childList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT + EnergyConsumption.ENERGY_DA) + EnergyConsumption.EPSILON_FS * k * d^2
-            else:
-                consumption = (len(self.childList) + 1) * k * (EnergyConsumption.ENERGY_PER_BIT + EnergyConsumption.ENERGY_DA) + EnergyConsumption.EPSILON_AMP * k * d^4
-        self.energy -= consumption
+            consumption = EnergyConsumption.ENERGY_PER_BIT.value * k + EnergyConsumption.EPSILON_FS.value * k * d**2
+        self.power -= consumption
 
 @dataclass
 class Parent:

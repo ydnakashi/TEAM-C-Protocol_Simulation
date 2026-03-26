@@ -6,7 +6,7 @@ from node import Node, Child, NodeType
 # beginning clustering algorithm, to be run at the very start 
 
 # pass in the networksx graph, the max distance of a what a node can hear (default is 20 for now, idk) and the constant used for twait (idk what the default should be)
-def initialSelection(graph, Rc=1, alpha=0.5):
+def twaitCalculation(graph, Rc=2, alpha=0.5):
     print("stat")
     # the total amount of nodes in the graph
     N = graph.number_of_nodes()
@@ -29,11 +29,17 @@ def initialSelection(graph, Rc=1, alpha=0.5):
             dist = math.sqrt((x1-x2)**2 + (y1-y2)**2)
             # print("distance: ", dist)
 
+            # if dist <= (3/2) * Rc:
+            #     node.neighbourList[other.id] = other
+            #     node.neighbourListOrder.append(other.id)
+
             if dist <= Rc:
                 node.neighbourList.append((other, dist))
             # only nodes that are within the multipled distance but outside of Rc are added
             elif dist <= (3/2) * Rc:
                 node.broadcastList.append((other, dist))
+            elif dist <= 3 * Rc:
+                node.relayList.append((other, dist))
                 
 
     # nodes to cluster ratio
@@ -61,78 +67,63 @@ def initialSelection(graph, Rc=1, alpha=0.5):
             twait = alpha * (ICDi / Rc) + (1 - alpha) * \
                 (1 - (NNi / N))
         node.twait = twait
-    createClusters(graph)
+    # createClusters(graph)
 
-def createClusters(graph):
-    print("starting clusters")
-    
+def stateSelection(graph):    
     sortedNodes = sorted(graph.nodes(), key=lambda n: graph.nodes[n]["node"].twait)
-    bsCoords = []
-    # no broadcast received - send out a CH message
+    # State setting based on twait
     for n in sortedNodes:
         node = graph.nodes[n]["node"]
-        if(node.state == "BASE_STATION"): 
-            print("bs")
-            bsCoords = node.coords
-            print(bsCoords)
-            continue
-        if(node.parent.node == None):
+        if node.coords == (0, 0):
+            node.state = NodeType.BASE_STATION
+        elif node.state == None or node.state == NodeType.IRRESOLUTE:
+            node.state = NodeType.CLUSTER_HEAD
             node.broadcast(message={
-                "type": "BROADCAST",
+                "type": "STATE",
                 "sender": node.id,
-                "state": NodeType.CLUSTER_HEAD})
-        # already has a CH parent, making it a SubCH
-        elif (node.parent.node.state != None):
+                "state": NodeType.CLUSTER_HEAD
+                })
+        elif node.state == NodeType.IRRESOLUTE:
+            node.state = NodeType.CLUSTER_HEAD
             node.broadcast(message={
-                "type": "BROADCAST",
-                "state": NodeType.SUBCLUSTER_HEAD})
-     
+                "type": "STATE",
+                "sender": node.id,
+                "state": NodeType.IRRESOLUTE
+                })
+
+def clusterCreation(graph, baseStationId):
+    print("starting clusters")
+    sortedNodes = sorted(graph.nodes(), key=lambda n: graph.nodes[n]["node"].twait)
+    bsNode = graph.nodes[baseStationId]['node']
+
+    # parent selection
     for n in sortedNodes:
         node = graph.nodes[n]["node"]
-        # if it is still an IR at the end, make it a CH
-        if node.state == NodeType.IRRESOLUTE:
-            node.state = NodeType.CLUSTER_HEAD
-        # make it a CH if it still has no parent
-        elif node.state == None: 
-            node.state = NodeType.CLUSTER_HEAD
+        if node.state == NodeType.BASE_STATION:
+            continue
 
-    
-        # find nearest CH to the BS to get CH to CH routing
-
+        # get list of possible parent nodes
         if node.state == NodeType.CLUSTER_HEAD:
-            # assuming BS is [0, 0]
+            node.parent.node = bsNode
+            nodeList = [t[0] for t in node.relayList + node.broadcastList if t[0].state == NodeType.CLUSTER_HEAD]
+            if nodeList:
+                # assuming BS is [0, 0], get list of nodes to distance to base station
+                distanceList = [(no, math.sqrt((no.coords[0]-0)**2 + (no.coords[1]-0)**2)) for no in nodeList]
+                
+                # get their own distance to base station
+                BSdist = math.sqrt((node.coords[0]-0)**2 + (node.coords[1]-0)**2)
 
-            bsDist = math.sqrt((node.coords[0]-0)**2 + (node.coords[1] -0)**2)
-            node.broadcast(message={
-                "type": "CHROUTE",
-                "distance" : bsDist})
-
-        if node.parent.node != None:
-            node.broadcast(message = {
-                "type": "MEMBERJOIN",
-                "id": node.id,
-                "state": node.state,
-                "coords": node.coords
-            })
-    
-    
-
-# G = nx.Graph()
-# node1 = Node(0, power=100, coords=[10,20])
-# node2 = Node(1, power=100, coords=[15,25])
-# node3 = Node(2, power=100, coords=[50,50])
-# node4 = Node(3, power=100, coords=[18,23])
-
-# G.add_node(node1)
-# G.add_node(node2)
-# G.add_node(node3)
-# G.add_node(node4)
-
-# # initialSelection(G)
-
-# for node in G:
-#     print(node.state)
-# # createClusters(G)
-
-
-
+                # get neighbour node closest to base station
+                minNode, minDist = min(distanceList, key=lambda t: t[1])
+                
+                if minDist < BSdist:
+                    node.parent.node = minNode
+        else:
+            nodeList = node.neighbourList
+            node.parent.node = min(nodeList, key=lambda t:t[1])[0]
+        
+        node.broadcast(message = {
+                    "type": "MEMBERJOIN",
+                    "id": node.id,
+                    "state": node.state,
+                })
