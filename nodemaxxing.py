@@ -7,7 +7,6 @@ from node import Node, Child, NodeType
 
 # pass in the networksx graph, the max distance of a what a node can hear (default is 20 for now, idk) and the constant used for twait (idk what the default should be)
 def twaitCalculation(graph, Rc=2, alpha=0.5):
-    print("stat")
     # the total amount of nodes in the graph
     N = graph.number_of_nodes()
     # dimensions of the graph, currently hardcoded for now ...
@@ -106,6 +105,7 @@ def clusterCreation(graph, baseStationId):
         if node.state == NodeType.CLUSTER_HEAD:
             node.parent.node = bsNode
             nodeList = [t[0] for t in node.relayList + node.broadcastList if t[0].state == NodeType.CLUSTER_HEAD]
+        
             if nodeList:
                 # assuming BS is [0, 0], get list of nodes to distance to base station
                 distanceList = [(no, math.sqrt((no.coords[0]-0)**2 + (no.coords[1]-0)**2)) for no in nodeList]

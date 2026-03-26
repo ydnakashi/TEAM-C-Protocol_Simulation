@@ -316,12 +316,15 @@ class NetworkModel:
         slot = 0
         total = 0
         for id, child in self._graph.nodes[node]["node"].chdList.items():
+            self._graph.nodes[id]["node"].tdmaSlot = slot
             child.tdma_slot = slot
             slot += 1
             total += 1
         
         self._graph.nodes[node]["node"].waiting = total  # Total time slots
         self._graph.nodes[node]["node"].timer = -1  # max time to wait before declaring lost packet
+        for id, child in self._graph.nodes[node]["node"].chdList.items():
+            self._graph.nodes[id]["node"].totalSlots = total
 
     def spawn_TDMA_packets(self, parent, ready=True):
         """Spawn packets to inform children of their TDMA slot"""
@@ -367,7 +370,7 @@ class NetworkModel:
                 currChild.worthiness = childWorthiness
                 # if parentWorthiness == 0: 
                 #     currChild.action = Action.ORPHAN_ELECTION
-                print(childWorthiness, parentWorthiness)
+                print("Worthiness ", childWorthiness, parentWorthiness)
                 childObj.L = 0
                 childObj.N = 0
                 currChild.parent.L = 0
@@ -443,8 +446,7 @@ class NetworkModel:
         # packet dropped 
         if random.random() < 0.02:
             pck.status = PacketStatus.DROPPED
-        
-
+    
 
     def move_packets(self):
         SPEED = 0.10  # fraction-of-hop per tick
@@ -626,6 +628,8 @@ class NetworkModel:
                 self._phase = Phase.ROUTING
 
             else:
+                if self._tick == 35:
+                    print("")
                 self._tdma_slot+=1  # Start a new TDMA slot if all packets reached the next-hop
 
                 for ni in self._graph.nodes():
@@ -680,9 +684,9 @@ class NetworkModel:
                         (self._tdma_slot % node.totalSlots == node.tdmaSlot):
 
                         if(node.orphan_timer != -1): node.orphan_timer -= 1
-                        print(node.orphan_timer)
+                        # print(node.orphan_timer)
                         if(node.orphan_timer == 0):
-                            print("sending message for ", ni, " to ", node.orphans)
+                            # print("sending message for ", ni, " to ", node.orphans)
                             orph_msg = {
                                 "chdList": node.orphans
                             }
@@ -706,6 +710,9 @@ class NetworkModel:
                     # elif (node.action == Action.ORPHAN_ELECTION):
 
         # current time period = 500 ticks? maybe less? idk
+        # for ni in self._graph.nodes(): 
+        #     print(self._graph.nodes[ni]["node"].id, self._graph.nodes[ni]["node"].state)
+        
         if self._tick % 250 == 0:
             self.startWorthinessCalc()
 

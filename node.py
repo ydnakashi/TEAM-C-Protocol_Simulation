@@ -58,19 +58,19 @@ class Node:
     #     self.overall_score = 100
     #     # self.timeSlot = 0
     #     self.currentBSDist = 1000000000
-    def __init__(self, id, power=100.0, coords=[0,0], bsCoords=[0,0], Rc=2):
+    def __init__(self, id, power=100.0, coords=None, bsCoords=None, Rc=2):
         self.id: int = id
         self.state: NodeType = None
         self.power: float = power
-        self.coords: tuple(int, int) = coords
+        self.coords: tuple[int, int] = tuple(coords) if coords else (0, 0)
         self.worthiness: float = 1
         self.overall_score: float = 1
-        self.BScoords: tuple(int, int) = bsCoords # x, y
+        self.BScoords: tuple[int, int] = tuple(bsCoords) if bsCoords else (0, 0)
 
         self.chdList: dict[int, Child] = {}
-        self.neighbourList: list[tuple(Node, float)] = []   # <= Rc
-        self.broadcastList: list[tuple(Node, float)] = []   # <= 3/2*Rc
-        self.relayList: list[tuple(Node, float)] = []       # <= 3*Rc
+        self.neighbourList: list[tuple[Node, float]] = []   # <= Rc
+        self.broadcastList: list[tuple[Node, float]] = []   # <= 3/2*Rc
+        self.relayList: list[tuple[Node, float]] = []       # <= 3*Rc
         self.parent = Parent()
 
         self.twait = 0
