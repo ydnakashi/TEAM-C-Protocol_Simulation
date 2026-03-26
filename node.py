@@ -23,11 +23,11 @@ STATE_STYLE: dict[NodeType, tuple[str, float, int]] = {
     NodeType.DEAD:     ("#1e1e2e", 0.65, 100),
 }
 
-class EnergyConsumption(Enum): # All in nanojoules
-    ENERGY_PER_BIT = 50.0 # nj/bit
-    EPSILON_FS = 0.01   # nj/bit/m^2
-    ENERGY_DA = 5.0 # nj/bit/signal
-    EPSILON_AMP = 0.0000013 # nj/bit/m^4
+class EnergyConsumption(Enum): # All in joules
+    ENERGY_PER_BIT = 50.0e-9 # j/bit
+    EPSILON_FS = 10.0e-12   # j/bit/m^2
+    ENERGY_DA = 5.0e-9 # nj/bit/signal
+    EPSILON_AMP = 0.0013e-12 # nj/bit/m^4
 
 @dataclass
 class Child:
@@ -195,6 +195,8 @@ class Node:
         else:
             consumption = EnergyConsumption.ENERGY_PER_BIT.value * k + EnergyConsumption.EPSILON_FS.value * k * d**2
         self.power -= consumption
+        if self.power < 0:
+            self.power = 0
 
 @dataclass
 class Parent:
