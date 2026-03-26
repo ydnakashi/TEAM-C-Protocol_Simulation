@@ -311,9 +311,6 @@ class NetworkModel:
             if (len(self._graph.nodes[ni]["node"].chdList) == 0):
                 self._graph.nodes[ni]["node"].action = Action.SEND_DATA
 
-    # def tmp_testing_energy(self):
-    #     self._graph.nodes[]
-
     def create_TDMA_schedule(self, node):
         """Create TDMA schedule for node's children"""
         slot = 0
@@ -452,17 +449,19 @@ class NetworkModel:
                         # node.tdmaSlot = pkt.content["schd"][pkt.destination]
                         # node.totalSlots = pkt.content["tt"]
                         self.update_TDMA_slot(pkt.destination, pkt.content["schd"][pkt.destination], pkt.content["tt"])
-                        if(pkt.content["ready"] and len(node.chdList) == 0): 
+                        if(pkt.content["ready"] and len(node.chdList) == 0 and node.action == Action.ELECTION): 
                             node.action = Action.SEND_DATA
+                        elif(node.action == Action.ORPHAN_ELECTION):
+                            node.action = Action.ELECTION
                         node.ready_to_send = pkt.content["ready"]
 
                     elif(pkt.content["type"] == "DATA_ACK"):
                         # node.p_rcvd = True
                         node.parent.L += 1
-                        node.action = Action.ELECTION
+                        node.action = Action.ORPHAN_ELECTION
                         node.ready_to_send = False
 
-                    elif(pkt.content["type"] == "UPDATE_HEAD" or pkt.content["type"] == "UPDATE_HEAD_ORPHAN"):
+                    elif(pkt.content["type"] == "UPDATE_HEAD"):
                         self.update_new_head(pkt.destination, pkt.content)
                         self.redo_edges()
                     
@@ -470,20 +469,29 @@ class NetworkModel:
                         self.update_no_head(pkt.destination, pkt.content)
                         self.redo_edges()
                     
+                    elif(pkt.content["type"] == "UPDATE_HEAD_ORPHAN"):
+                        self.update_new_head_orphan(pkt.destination, pkt.content)
+                        self.redo_edges()
+                    
                     elif(pkt.content["type"] == "READY"):
-                        if (len(node.chdList) == 0):
+                        if (len(node.chdList) == 0 and node.action == Action.ELECTION):
                             node.action = Action.SEND_DATA
+                        elif(node.action == Action.ORPHAN_ELECTION):
+                            node.action = Action.ELECTION
                         node.ready_to_send = True
 
                     elif(pkt.content["type"] == "REQUEST_PARENT"):
                         # node waits a certain amount of time before doing elect_head_orphan?
-                        # adds all the pkt.sources to a list somewhere
-                        pass
+                        if(node.orphan_timer == -1): node.orphan_timer = 8   # set to something
+                        # else: node.orphan_timer -= 1
+                        # adds all the pkt.sources to a list
+                        node.orphans[pkt.source] = Child(self._graph.nodes[pkt.source]["node"].state)
+                        node.action = Action.AWAIT_REQS
                     
 
     def send_data_packet(self, ni):
         node = self._graph.nodes[ni]["node"]
-        print(ni, node.parent.node.id, node.parent.node.chdList)
+        # print(ni, node.parent.node.id, node.parent.node.chdList)
 
         node.parent.node.chdList[ni].N += 1  # parent observes that the child should be sending a packet in this time slot
 
@@ -497,6 +505,8 @@ class NetworkModel:
             # node.sent = True
             node.action = Action.IDLE
             node.timer = self._loss_interval  # Set timer for ACK packet to be returned from parent
+            node.orphan_timer = -1  # reset timer
+            node.orphans = {}  # delete orphans
 
     def send_data_ack(self, pkt):
         node = self._graph.nodes[pkt.destination]["node"]
@@ -515,7 +525,7 @@ class NetworkModel:
     def send_election_msg(self, ni, msg):
         if(msg["type"] == "UPDATE_HEAD"):
             self.spawn_packet(msg, ni, msg["oldParent"])
-        else:
+        elif(msg["type"] == "UPDATE_NOHEAD"):
             self.spawn_packet(msg, ni, msg["newHead"])
 
         for ci in msg["chdList"]:
@@ -571,28 +581,53 @@ class NetworkModel:
                     elif (node.action == Action.ELECTION) and \
                         (self._tdma_slot % node.totalSlots == node.tdmaSlot):
 
-                        # print("election start for node, ", ni)
                         node.action = Action.IDLE
+
                         if(len(node.chdList) == 0):
                             if(node.parent.node.id == self._base_station or node.ready_to_send):
                                 node.action = Action.SEND_DATA
                             # if(node.ready_to_send): node.action = Action.SEND_DATA
                             continue
                         
-                        msg = self.elect_new_head(ni, 10)   # Random threshold for now
-                        print(msg)
-                        if msg == None: 
-                            # send no_election? small packet to tell them to continue sending data
-                            self.send_ready_msg(ni)
-                            # if(node.ready_to_send):
-                            #     node.action = Action.SEND_DATA
-                            # if(node.ready_to_send): node.action = Action.SEND_DATA
-                            continue
-                        self.send_election_msg(ni, msg)
-                    # elif (node.action == Action.ORPHAN_ELECTION):
-                    #     # 
+                        # COMMENTED OUT NORMAL ELECTION FOR NOW
+                        # msg = self.elect_new_head(ni, 10)   # Random threshold for now
+                        # print(msg)
+                        # if msg == None: 
+                        #     # send no_election? small packet to tell them to continue sending data
+                        #     self.send_ready_msg(ni)
+                        #     # if(node.ready_to_send):
+                        #     #     node.action = Action.SEND_DATA
+                        #     # if(node.ready_to_send): node.action = Action.SEND_DATA
+                        #     continue
+                        # self.send_election_msg(ni, msg)
+                    elif (node.action == Action.ORPHAN_ELECTION) and \
+                        (self._tdma_slot % node.totalSlots == node.tdmaSlot):
+
+                        msg, ch = self.observe_parent_potential(ni, 10)   # Random threshold for now
+                        if msg != None:
+                            # print(ch.id, msg["child"].id)
+                            self.spawn_packet(msg, ni, ch.id)
+                            node.action = Action.IDLE
+                        else:
+                            node.action = Action.ELECTION
                     
-                        
+                    elif (node.action == Action.AWAIT_REQS) and \
+                        (self._tdma_slot % node.totalSlots == node.tdmaSlot):
+
+                        if(node.orphan_timer != -1): node.orphan_timer -= 1
+                        print(node.orphan_timer)
+                        if(node.orphan_timer == 0):
+                            print("sending message for ", ni, " to ", node.orphans)
+                            orph_msg = {
+                                "chdList": node.orphans
+                            }
+                            msg = self.elect_new_head_orphans(ni, orph_msg, 10)  # random threshold for now
+                            if(msg == None): self.send_ready_msg(ni)
+                            else: 
+                                self.send_election_msg(ni, msg)
+                                print(msg["newHead"])
+                            node.action = Action.ELECTION
+
 
         self.move_packets()
 
@@ -670,10 +705,15 @@ class NetworkModel:
     # Elect new head within orphaned nodes
     def elect_new_head_orphans(self, ni, msg, Eth):
         node = self._graph.nodes[ni]["node"]
+
+        find_state = NodeType.CLUSTER_HEAD
+        if([*msg["chdList"].values()][0].state == NodeType.ORDINARY):
+            find_state = NodeType.SUBCLUSTER_HEAD
+
         # Choose a node within the children that fit the criteria
         candidates = [
             self._graph.nodes[child] for child in msg["chdList"]
-            if self._graph.nodes[child]["node"].state.value == (node.state.value)+1 and self._graph.nodes[child]["node"].overall_score > Eth
+            if self._graph.nodes[child]["node"].state.value == find_state.value+1 and self._graph.nodes[child]["node"].overall_score > Eth
         ]
 
         if candidates:
@@ -689,8 +729,6 @@ class NetworkModel:
             UPDATE_HEAD_ORPHAN = {
                 "newHead": new_head["node"].id,
                 "chdList": msg["chdList"],
-                "oldHead": node.id,
-                "oldParent": node.parent.node.id,
                 "type": "UPDATE_HEAD_ORPHAN"
             }
 
@@ -704,7 +742,7 @@ class NetworkModel:
 
         return None  # no possible candidates
 
-    # Nodes update themselves when receiving UPDATE_HEAD or UPDATE_HEAD_ORPHANED message
+    # Nodes update themselves when receiving message
     def update_new_head(self, ni, msg):
         node = self._graph.nodes[ni]["node"]
         # If this is the new head, update itself as parent
@@ -719,16 +757,12 @@ class NetworkModel:
 
             node.chdList.update(msg["chdList"])
             node.chdList[msg["oldHead"]] = Child(state=self._graph.nodes[msg["oldHead"]]["node"].state)
-
-            # Update parent of itself to parent in the message only if not orphaned
-            if (msg["type"] != "UPDATE_HEAD_ORPHAN"): 
-                node.parent = Parent()
-                node.parent.node = self._graph.nodes[msg["oldParent"]]["node"]
-                node.tdmaSlot = msg["oldHeadSchd"][0]
-                node.totalSlots = msg["oldHeadSchd"][1]
-            
             del node.chdList[ni]
-            node.waiting = len(node.chdList)
+
+            node.parent = Parent()
+            node.parent.node = self._graph.nodes[msg["oldParent"]]["node"]
+            node.tdmaSlot = msg["oldHeadSchd"][0]
+            node.totalSlots = msg["oldHeadSchd"][1]
 
             self.create_TDMA_schedule(ni)
             self.spawn_TDMA_packets(ni)  # Broadcast MEMBERACK
@@ -759,8 +793,7 @@ class NetworkModel:
         # if the node is the parent in the message, add the children to its chdList
         elif(node.id == msg["newHead"]):
             node.chdList.update(msg["chdList"])
-            
-            node.waiting = len(node.chdList)
+
             # Create new TDMA schedule
             self.create_TDMA_schedule(ni)
             print(node.id, node.action)
@@ -769,14 +802,44 @@ class NetworkModel:
 
         return node
 
+    # Nodes update themselves when UPDATE_HEAD_ORPHANED message
+    def update_new_head_orphan(self, ni, msg):
+        node = self._graph.nodes[ni]["node"]
+        # If this is the new head, update itself as parent
+        if (node.id == msg["newHead"]):
+            # update state to new state
+            node.state = NodeType(node.state.value - 1)
+            print(node.state)
+            # if chdList is not empty, update the children state to state-1
+            chdList = node.chdList
+            if (len(chdList) > 0):
+                for child in chdList:
+                    self._graph.nodes[child]["node"].state = NodeType(self._graph.nodes[child]["node"].state.value - 1)
+                    print(self._graph.nodes[child]["node"].state)
+
+            node.chdList.update(msg["chdList"])
+            
+            del node.chdList[ni]
+
+            self.create_TDMA_schedule(ni)
+            self.spawn_TDMA_packets(ni)  # Broadcast MEMBERACK
+
+        # If this is a child, update its parent to new head
+        else:
+            node.parent = Parent()
+            node.parent.node = self._graph.nodes[msg["newHead"]]["node"]
+
+        return node
+
     # Observe if parent is still viable during election phase
     def observe_parent_potential(self, ni, Oth):
         node = self._graph.nodes[ni]["node"]
         # Check if parent overall score is greater than a threshold
-        if(self._graph.nodes[ni]["node"].parent.overall_score > Oth): return
+        if(self._graph.nodes[ni]["node"].parent.overall_score > Oth): return None, None
 
         # Parent is dead, move to closest CH
         closest_CH = self.find_closest_CH(node)
+        if(closest_CH == None): return None, None
 
         # Set parent to closest_CH
         node.parent.node = closest_CH
@@ -787,10 +850,23 @@ class NetworkModel:
             "type": "REQUEST_PARENT"
         }
 
-        return REQUEST_PARENT
+        return REQUEST_PARENT, closest_CH
 
-    def find_closest_CH(self, node):
-        pass
+    def find_closest_CH(self, node: Node):
+        closest_CH = None
+        nodeList = node.neighbourList
+        if(node.state == NodeType.CLUSTER_HEAD):
+            nodeList = node.broadcastList
+
+        for neighbor, dist in nodeList:
+            if(neighbor.state == NodeType.CLUSTER_HEAD and node.parent.node != neighbor and \
+                (closest_CH == None or closest_CH[1] > dist)):
+                
+                closest_CH = (neighbor, dist)
+        
+        if(closest_CH == None): return None
+        
+        return closest_CH[0]
 
     def get_packet_render_positions(
         self, layout: LayoutResult,
