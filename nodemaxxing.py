@@ -38,6 +38,8 @@ def twaitCalculation(graph, Rc=2, alpha=0.5):
             # only nodes that are within the multipled distance but outside of Rc are added
             elif dist <= (3/2) * Rc:
                 node.broadcastList.append((other, dist))
+            elif dist <= 3 * Rc:
+                node.relayList.append((other, dist))
                 
 
     # nodes to cluster ratio
@@ -101,13 +103,12 @@ def clusterCreation(graph, baseStationId):
             continue
 
         # get list of possible parent nodes
-        nodeList: list[tuple(Node, float)] = []
         if node.state == NodeType.CLUSTER_HEAD:
             node.parent.node = bsNode
-            nodeList = [t for t in node.broadcastList if t[0].state == NodeType.CLUSTER_HEAD]
+            nodeList = [t[0] for t in node.relayList if t[0].state == NodeType.CLUSTER_HEAD]
             if nodeList:
                 # assuming BS is [0, 0], get list of nodes to distance to base station
-                distanceList = [(no, math.sqrt((no.coords[0]-0)**2 + (no.coords[1]-0)**2)) for (no, _) in nodeList]
+                distanceList = [(no, math.sqrt((no.coords[0]-0)**2 + (no.coords[1]-0)**2)) for no in nodeList]
                 
                 # get their own distance to base station
                 BSdist = math.sqrt((node.coords[0]-0)**2 + (node.coords[1]-0)**2)

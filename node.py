@@ -58,6 +58,7 @@ class Node:
         self.chdList: dict[int, Child] = {}
         self.neighbourList: list[tuple(Node, float)] = []
         self.broadcastList: list[tuple(Node, float)] = []
+        self.relayList: list[tuple(Node, float)] = []
         self.parent = Parent()
 
         self.twait = 0
