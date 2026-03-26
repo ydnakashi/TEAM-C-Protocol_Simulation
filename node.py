@@ -44,6 +44,8 @@ class Action(Enum):
     SEND_DATA_ACK = auto() 
     IDLE = auto()
     ELECTION = auto()
+    ORPHAN_ELECTION = auto()
+    AWAIT_REQS = auto()
 
 class Node:
     def __init__(self, id, power=100, coords=[0,0]):
@@ -73,6 +75,8 @@ class Node:
         self.tdmaSlot = -1  # Default to -1 to represent no slot
         self.totalSlots = -1  # Default to -1 to represent no slot
         self.waiting = 0
+        self.orphan_timer = -1
+        self.orphans = {}
 
     def broadcast (self, message):
         # print(f"Node {self.id} received:", message)
