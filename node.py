@@ -56,9 +56,9 @@ class Node:
         self.BScoords: tuple(int, int) = bsCoords # x, y
 
         self.chdList: dict[int, Child] = {}
-        self.neighbourList: list[tuple(Node, float)] = []
-        self.broadcastList: list[tuple(Node, float)] = []
-        self.relayList: list[tuple(Node, float)] = []
+        self.neighbourList: list[tuple(Node, float)] = []   # <= Rc
+        self.broadcastList: list[tuple(Node, float)] = []   # <= 3/2*Rc
+        self.relayList: list[tuple(Node, float)] = []       # <= 3*Rc
         self.parent = Parent()
 
         self.twait = 0

@@ -527,15 +527,14 @@ class NetworkModel:
                 stateSelection(self._graph)
                 clusterCreation(self._graph, self.base_station)
 
-                for n in self._graph.nodes:
-                    node = self._graph.nodes[n]["node"]
-                    print(f"""
-                        {node.id} - {node.state}:
-                            Parent: {node.parent.node.id if node.parent.node != None else None}
-                            Children: {node.chdList.keys()}
-                    """
-                    )
-
+                # for n in self._graph.nodes:
+                #     node = self._graph.nodes[n]["node"]
+                #     print(f"""
+                #         {node.id} - {node.state}:
+                #             Parent: {node.parent.node.id if node.parent.node != None else None}
+                #             Children: {node.chdList.keys()}
+                #     """
+                #     )
 
                 self.init_TDMA()
                 self.redo_edges()
