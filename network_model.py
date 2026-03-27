@@ -134,7 +134,7 @@ class NetworkModel:
         self._tick: int = 0
         self._delivered: int = 0
         self._dropped: int = 0
-        self._spawn_interval: int = 3
+        self._spawn_interval: int = 6
         self._events: list[str] = []
         self._nodes: list[Node] = []
         self._active: list[Node] = []
@@ -487,12 +487,13 @@ class NetworkModel:
                             print("")
                         node.action = Action.SEND_DATA_ACK  # send ACK back
                         node.pkt = pkt
+                        node.waiting-=1 
 
                     elif(pkt.content["type"] == "MEMBERACK"):  # Update node's tdma slot received
                         # node.tdmaSlot = pkt.content["schd"][pkt.destination]
                         # node.totalSlots = pkt.content["tt"]
                         self.update_TDMA_slot(pkt.destination, pkt.content["schd"][pkt.destination], pkt.content["tt"])
-                        if(len(node.chdList) == 0 and node.action == Action.ELECTION):   # pkt.content["ready"] and
+                        if(len(node.chdList) == 0 and (node.action == Action.ELECTION or node.action == Action.IDLE or node.action == Action.AWAIT_PARENT)):   # pkt.content["ready"] and
                             node.action = Action.SEND_DATA
                         elif(node.action == Action.ORPHAN_ELECTION):
                             node.action = Action.ELECTION
@@ -501,14 +502,14 @@ class NetworkModel:
                     elif(pkt.content["type"] == "DATA_ACK"):
                         # node.p_rcvd = True
                         # node.parent.L += 1
-                        node.action = Action.ORPHAN_ELECTION
+                        if(node.action != Action.AWAIT_PARENT): node.action = Action.ORPHAN_ELECTION
                         # packet ack was dropped during transit 
                         if pkt.status == PacketStatus.DROPPED:
                             continue
                         else:
                             node.parent.L += 1
                         # node.action = Action.ELECTION
-                        # node.ready_to_send = False
+                        node.ready_to_send = True
                         # self.startWorthinessCalc()
 
                     elif(pkt.content["type"] == "UPDATE_HEAD"):
@@ -524,11 +525,11 @@ class NetworkModel:
                         self.redo_edges()
                     
                     elif(pkt.content["type"] == "READY"):
-                        if (len(node.chdList) == 0 and node.action == Action.ELECTION):
+                        if (len(node.chdList) == 0 and (node.action == Action.ELECTION or node.action == Action.IDLE)):
                             node.action = Action.SEND_DATA
                         elif(node.action == Action.ORPHAN_ELECTION):
                             node.action = Action.ELECTION
-                        # node.ready_to_send = True
+                        node.ready_to_send = True
 
                     elif(pkt.content["type"] == "REQUEST_PARENT"):
                         # node waits a certain amount of time before doing elect_head_orphan?
@@ -559,6 +560,7 @@ class NetworkModel:
             node.orphans = {}  # delete orphans
             node.waiting = len(node.chdList)
             node.timer = self._loss_interval * node.waiting
+            node.ready_to_send = False
 
     def send_data_ack(self, pkt):
         # CH doesnt even know it has this child and it was their turn to send so nithing happens
@@ -571,16 +573,16 @@ class NetworkModel:
         if(node.timer == -1):
             node.timer = self._loss_interval * node.waiting
 
-        node.waiting-=1 
+        # node.waiting-=1 
         self.spawn_packet({"type": "DATA_ACK"}, pkt.destination, pkt.source)
         node.chdList[pkt.source].L += 1
         node.pkt = None
 
-        print(pkt.destination, node.waiting)
-        if(node != self._base_station and (node.waiting == 0 or node.timer == 0)):
-            node.action = Action.SEND_DATA
-        else:
-            node.action = Action.IDLE
+        # if(node != self._base_station and (node.waiting <= 0 or node.timer <= 0)): 
+        #     node.action = Action.SEND_DATA
+        # else:
+        #     node.action = Action.IDLE
+        node.action = Action.SEND_DATA
 
     def send_election_msg(self, ni, msg):
         if(msg["type"] == "UPDATE_HEAD"):
@@ -643,7 +645,7 @@ class NetworkModel:
 
                     # Send data packet during your TDMA time slot
                     if (node != self._base_station) and (node.action == Action.SEND_DATA) and \
-                        (self._tdma_slot % node.totalSlots == node.tdmaSlot):
+                        (self._tdma_slot % node.totalSlots == node.tdmaSlot) and (node.waiting <= 0 or node.timer <= 0):
                         # print(node.parent.node.chdList)
                         self.send_data_packet(ni)
                     
@@ -655,10 +657,10 @@ class NetworkModel:
                     elif (node.action == Action.ELECTION) and \
                         (self._tdma_slot % node.totalSlots == node.tdmaSlot):
 
-                        # node.action = Action.IDLE
+                        node.action = Action.SEND_DATA
 
                         if(len(node.chdList) == 0):    #  or node.ready_to_send
-                            node.action = Action.SEND_DATA
+                            # node.action = Action.IDLE
                             # if(node.ready_to_send): node.action = Action.SEND_DATA
                             continue
                         
@@ -667,7 +669,7 @@ class NetworkModel:
                         if msg == None: 
                             # send no_election? small packet to tell them to continue sending data
                             self.send_ready_msg(ni)
-                            node.action = Action.SEND_DATA
+                            # node.action = Action.IDLE
 
                             # if(node.ready_to_send):
                             #     node.action = Action.SEND_DATA
@@ -682,7 +684,7 @@ class NetworkModel:
                         if msg != None:
                             # print(ch.id, msg["child"].id)
                             self.spawn_packet(msg, ni, ch.id)
-                            # node.action = Action.IDLE
+                            node.action = Action.AWAIT_PARENT
                         else:
                             node.action = Action.ELECTION
                     
@@ -713,7 +715,6 @@ class NetworkModel:
                             # if(node.ready_to_send): node.action = Action.SEND_DATA
                             continue
                         self.send_election_msg(ni, msg)
-                    # elif (node.action == Action.ORPHAN_ELECTION):
 
         # current time period = 500 ticks? maybe less? idk
         # for ni in self._graph.nodes(): 

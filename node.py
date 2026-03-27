@@ -46,6 +46,7 @@ class Action(Enum):
     ELECTION = auto()
     ORPHAN_ELECTION = auto()
     AWAIT_REQS = auto()
+    AWAIT_PARENT = auto()
 
 class Node:
     # OLD VERSION - ONCE MERGED COMBINE THE TWO 
@@ -80,7 +81,7 @@ class Node:
         self.label=f"Node {self.id}"
       
         self.action = Action.IDLE
-        self.ready_to_send = False
+        self.ready_to_send = True
         self.pkt = None
         self.timer = -1
         self.tdmaSlot = -1  # Default to -1 to represent no slot
