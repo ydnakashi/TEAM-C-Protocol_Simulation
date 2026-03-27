@@ -353,6 +353,8 @@ class NetworkModel:
         return w
     
     def startWorthinessCalc(self):
+        alpha = 0.0
+        beta = 1.0
         parents = self.get_parent_nodes() 
         for id in parents:
             currNode = self._graph.nodes[id]["node"]
@@ -360,10 +362,10 @@ class NetworkModel:
                 # the actual child node
                 currChild = self._graph.nodes[childId]["node"]
                 # current weights are just 1, 1 
-                childWorthiness = (1*self.calculate_worthiness_score(childObj.L, childObj.N)) + 1*currChild.power
+                childWorthiness = (alpha*self.calculate_worthiness_score(childObj.L, childObj.N)) + beta*(currChild.power/0.5)
                 childObj.overall_score=childWorthiness
                 # child calculates its parents worthiness
-                parentWorthiness =  (1 * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + 1 * currNode.power
+                parentWorthiness =  (alpha * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + beta * (currChild.power/0.5)
                 # if parent worthiness has been 0 three times in a row, node is destoryed? Or just as soon as it's 0 its dead
                 currChild.parent.overall_score = parentWorthiness
                 # would this need to be a broadcast message? 

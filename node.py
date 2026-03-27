@@ -58,7 +58,7 @@ class Node:
     #     self.overall_score = 100
     #     # self.timeSlot = 0
     #     self.currentBSDist = 1000000000
-    def __init__(self, id, power=100.0, coords=None, bsCoords=None, Rc=2):
+    def __init__(self, id, power=0.5, coords=None, bsCoords=None, Rc=2):
         self.id: int = id
         self.state: NodeType = None
         self.power: float = power
