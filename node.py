@@ -38,6 +38,7 @@ class Child:
     overall_score: float = 1
     L: int = 0
     N: int = 0
+    powerRatio: float = 0.0
 
 class Action(Enum):
     SEND_DATA = auto()
@@ -109,6 +110,14 @@ class Node:
             for neighbour, dist in self.neighbourList:
                 neighbour.receive(self, message, -1)
                 self.consume_energy(sys.getsizeof(message), dist)
+        
+        # if(message['type'] == "POWERREQ"):
+        #     if self.state == NodeType.DEAD:
+        #         return
+        #     for neighbour, dist in self.broadcastList:
+        #         if neighbour.id in self.chdList:
+        #             neighbour.recieve(self, message)
+
 
     def receive(self, sender, message):
         # helper function
@@ -158,7 +167,7 @@ class Node:
         if message["type"] == "CHROUTE":
             if self.state == NodeType.CLUSTER_HEAD or self.state == NodeType.BASE_STATION: 
                 dist = math.sqrt((self.coords[0]-0)**2 + (self.coords[1]- 0)**2)
-                sender.receive(message= {
+                sender.receive(message={
                     "type": "CHRETURN",
                     "dist": dist
                 })
@@ -167,7 +176,22 @@ class Node:
             if message.dist > self.currentBSDist:
                 self.parent.node = sender
 
-        
+        # if message['type'] == "POWERREQ":
+        #     if self.state == NodeType.DEAD:
+        #         return
+
+        #     self.parent.powerRatio = message['parentPower']
+        #     sender.recieve(message = {
+        #         "type": "POWERRETURN",
+        #         "power": self.powerRatio
+        #     })
+
+        # if message['type'] == "POWERRETURN":
+        #     if self.state == NodeType.DEAD:
+        #         return
+        #     self.chdList[sender.id].powerRatio = message["power"]
+           
+            
     def neighbourCount(self):
         return len(self.neighbourList)
     
@@ -219,3 +243,4 @@ class Parent:
     L: int = 0
     N: int = 0
     overall_score: float = 1
+    powerRatio: float = 0.0
