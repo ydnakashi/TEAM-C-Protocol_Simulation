@@ -28,10 +28,6 @@ def twaitCalculation(graph, Rc=2, alpha=0.5):
             dist = math.sqrt((x1-x2)**2 + (y1-y2)**2)
             # print("distance: ", dist)
 
-            # if dist <= (3/2) * Rc:
-            #     node.neighbourList[other.id] = other
-            #     node.neighbourListOrder.append(other.id)
-
             if dist <= Rc:
                 node.neighbourList.append((other, dist))
             # only nodes that are within the multipled distance but outside of Rc are added
@@ -120,7 +116,11 @@ def clusterCreation(graph, baseStationId):
                     node.parent.node = minNode
         else:
             nodeList = node.neighbourList
-            node.parent.node = min(nodeList, key=lambda t:t[1])[0]
+            for neighbour, _ in sorted(nodeList, key=lambda t:t[1]):
+                if (node.state == NodeType.ORDINARY and neighbour.state == NodeType.SUBCLUSTER_HEAD) \
+                    or (node.state == NodeType.SUBCLUSTER_HEAD and neighbour.state == NodeType.CLUSTER_HEAD):
+                    node.parent.node = neighbour
+                    break
         
         node.broadcast(message = {
                     "type": "MEMBERJOIN",

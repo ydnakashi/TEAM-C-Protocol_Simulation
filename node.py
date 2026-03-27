@@ -24,10 +24,10 @@ STATE_STYLE: dict[NodeType, tuple[str, float, int]] = {
 }
 
 class EnergyConsumption(Enum): # All in joules
-    ENERGY_PER_BIT = 50.0e-9 # j/bit
-    EPSILON_FS = 10.0e-12   # j/bit/m^2
-    ENERGY_DA = 5.0e-9 # nj/bit/signal
-    EPSILON_AMP = 0.0013e-12 # nj/bit/m^4
+    ENERGY_PER_BIT = 50.0 # nj/bit
+    EPSILON_FS = 10.0e-3   # nj/bit/m^2
+    ENERGY_DA = 5.0 # nj/bit/signal
+    EPSILON_AMP = 0.0013e-3 # nj/bit/m^4
 
 @dataclass
 class Child:
@@ -35,7 +35,7 @@ class Child:
     state: NodeType
     tdma_slot: int = -1    # -1 means no slot given
     # received: bool = False
-    overall_score: float = 0
+    overall_score: float = 1
     L: int = 0
     N: int = 0
 
@@ -58,10 +58,11 @@ class Node:
     #     self.overall_score = 100
     #     # self.timeSlot = 0
     #     self.currentBSDist = 1000000000
-    def __init__(self, id, power=100.0, coords=None, bsCoords=None, Rc=2):
+    def __init__(self, id, power=0.5e9, coords=None, bsCoords=None, Rc=2): # power in nanojoules
         self.id: int = id
         self.state: NodeType = None
         self.power: float = power
+        self.powerRatio: float = power/(0.5e9)
         self.coords: tuple[int, int] = tuple(coords) if coords else (0, 0)
         self.worthiness: float = 1
         self.overall_score: float = 1
@@ -119,10 +120,10 @@ class Node:
         def float_node(tuples_list, nodeId):
             index = find_index_by_senderId(tuples_list, nodeId)
             if index == -1:
-                return "floating failed"
+                return False
             tup = tuples_list.pop(index)
             tuples_list.insert(0, tup)
-            return None
+            return True
 
         # direct neighbour   
         if message["type"] == "STATE":
@@ -195,12 +196,16 @@ class Node:
         else:
             consumption = EnergyConsumption.ENERGY_PER_BIT.value * k + EnergyConsumption.EPSILON_FS.value * k * d**2
         self.power -= consumption
+        self.powerRatio = self.power/(0.5e9)
         if self.power < 0:
             self.power = 0
+            self.powerRatio = 0
+        # if isinstance(self.power, complex):
+        #     self.power = self.power.real
 
 @dataclass
 class Parent:
     node: Node = None
     L: int = 0
     N: int = 0
-    overall_score: float = 0
+    overall_score: float = 1
