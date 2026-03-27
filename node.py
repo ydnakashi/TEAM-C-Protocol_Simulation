@@ -34,7 +34,7 @@ class Child:
     """A node that sends packets to its parent. Seen from the view of the parent."""
     state: NodeType
     tdma_slot: int = -1    # -1 means no slot given
-    # received: bool = False
+    received: bool = False
     overall_score: float = 1
     L: int = 0
     N: int = 0
@@ -46,7 +46,6 @@ class Action(Enum):
     ELECTION = auto()
     ORPHAN_ELECTION = auto()
     AWAIT_REQS = auto()
-    AWAIT_PARENT = auto()
 
 class Node:
     # OLD VERSION - ONCE MERGED COMBINE THE TWO 
@@ -86,9 +85,10 @@ class Node:
         self.timer = -1
         self.tdmaSlot = -1  # Default to -1 to represent no slot
         self.totalSlots = -1  # Default to -1 to represent no slot
-        self.waiting = 0
+        # self.waiting = 0
         self.orphan_timer = -1
         self.orphans = {}
+        self.await_parent = False
 
     def broadcast (self, message):
         # print(f"Node {self.id} received:", message)
@@ -170,6 +170,15 @@ class Node:
         
     def neighbourCount(self):
         return len(self.neighbourList)
+    
+    def childrenWaiting(self):
+        waiting = [c for c in self.chdList.values() if not c.received]
+        # print(self.id, " waiting ", waiting)
+        return len(waiting)
+    
+    def resetWaiting(self):
+        for c in self.chdList.values():
+            c.received = False
 
     # icd used to calcualte twait time
     # euclidan distance of all the nodes in its neighbour array

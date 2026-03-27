@@ -311,19 +311,21 @@ class NetworkModel:
             if (len(self._graph.nodes[ni]["node"].chdList) == 0):
                 self._graph.nodes[ni]["node"].action = Action.SEND_DATA
 
-    def create_TDMA_schedule(self, node):
+    def create_TDMA_schedule(self, ni):
         """Create TDMA schedule for node's children"""
         slot = 0
         total = 0
-        for id, child in self._graph.nodes[node]["node"].chdList.items():
+        node = self._graph.nodes[ni]["node"]
+        for id, child in node.chdList.items():
             self._graph.nodes[id]["node"].tdmaSlot = slot
             child.tdma_slot = slot
             slot += 1
             total += 1
         
-        self._graph.nodes[node]["node"].waiting = total  # Total time slots
-        self._graph.nodes[node]["node"].timer = -1  # max time to wait before declaring lost packet
-        for id, child in self._graph.nodes[node]["node"].chdList.items():
+        # self._graph.nodes[node]["node"].waiting = total  # Total time slots
+        node.resetWaiting()
+        node.timer = -1  # max time to wait before declaring lost packet
+        for id, child in node.chdList.items():
             self._graph.nodes[id]["node"].totalSlots = total
 
     def spawn_TDMA_packets(self, parent, ready=True):
@@ -333,7 +335,7 @@ class NetworkModel:
             schedule = {id: c.tdma_slot for id, c in self._graph.nodes[parent]["node"].chdList.items()}
             msg = {
                 "schd": schedule,
-                "tt": self._graph.nodes[parent]["node"].waiting,
+                "tt": len(self._graph.nodes[parent]["node"].chdList),
                 "ready": ready,
                 "type": "MEMBERACK"   
             }
@@ -485,24 +487,26 @@ class NetworkModel:
                         if pkt.status == PacketStatus.DROPPED:
                             # failed to recieve a packet during a time slot
                             print("")
-                        node.action = Action.SEND_DATA_ACK  # send ACK back
+                        # node.action = Action.SEND_DATA_ACK  # send ACK back
                         node.pkt = pkt
-                        node.waiting-=1 
+                        # node.waiting-=1 
 
                     elif(pkt.content["type"] == "MEMBERACK"):  # Update node's tdma slot received
                         # node.tdmaSlot = pkt.content["schd"][pkt.destination]
                         # node.totalSlots = pkt.content["tt"]
+                        if(pkt.source != node.parent.node.id): continue
                         self.update_TDMA_slot(pkt.destination, pkt.content["schd"][pkt.destination], pkt.content["tt"])
-                        if(len(node.chdList) == 0 and (node.action == Action.ELECTION or node.action == Action.IDLE or node.action == Action.AWAIT_PARENT)):   # pkt.content["ready"] and
+                        if(len(node.chdList) == 0 and (node.action == Action.ELECTION or node.action == Action.IDLE)):   # pkt.content["ready"] and
                             node.action = Action.SEND_DATA
                         elif(node.action == Action.ORPHAN_ELECTION):
                             node.action = Action.ELECTION
+                        node.await_parent = False
                         # node.ready_to_send = pkt.content["ready"]
 
                     elif(pkt.content["type"] == "DATA_ACK"):
                         # node.p_rcvd = True
                         # node.parent.L += 1
-                        if(node.action != Action.AWAIT_PARENT): node.action = Action.ORPHAN_ELECTION
+                        if(not node.await_parent): node.action = Action.ORPHAN_ELECTION
                         # packet ack was dropped during transit 
                         if pkt.status == PacketStatus.DROPPED:
                             continue
@@ -525,6 +529,7 @@ class NetworkModel:
                         self.redo_edges()
                     
                     elif(pkt.content["type"] == "READY"):
+                        if(pkt.source != node.parent.node.id): continue
                         if (len(node.chdList) == 0 and (node.action == Action.ELECTION or node.action == Action.IDLE)):
                             node.action = Action.SEND_DATA
                         elif(node.action == Action.ORPHAN_ELECTION):
@@ -533,7 +538,7 @@ class NetworkModel:
 
                     elif(pkt.content["type"] == "REQUEST_PARENT"):
                         # node waits a certain amount of time before doing elect_head_orphan?
-                        if(node.orphan_timer == -1): node.orphan_timer = 8   # set to something
+                        if(node.orphan_timer == -1): node.orphan_timer = 5   # set to something
                         # else: node.orphan_timer -= 1
                         # adds all the pkt.sources to a list
                         node.orphans[pkt.source] = Child(self._graph.nodes[pkt.source]["node"].state)
@@ -558,8 +563,9 @@ class NetworkModel:
             node.timer = self._loss_interval  # Set timer for ACK packet to be returned from parent
             node.orphan_timer = -1  # reset timer
             node.orphans = {}  # delete orphans
-            node.waiting = len(node.chdList)
-            node.timer = self._loss_interval * node.waiting
+            # node.waiting = len(node.chdList)
+            node.resetWaiting()
+            node.timer = self._loss_interval * len(node.chdList)
             node.ready_to_send = False
 
     def send_data_ack(self, pkt):
@@ -571,18 +577,19 @@ class NetworkModel:
             return
 
         if(node.timer == -1):
-            node.timer = self._loss_interval * node.waiting
+            node.timer = self._loss_interval * len(node.chdList)
 
         # node.waiting-=1 
         self.spawn_packet({"type": "DATA_ACK"}, pkt.destination, pkt.source)
         node.chdList[pkt.source].L += 1
         node.pkt = None
+        node.chdList[pkt.source].received = True
 
         # if(node != self._base_station and (node.waiting <= 0 or node.timer <= 0)): 
         #     node.action = Action.SEND_DATA
         # else:
         #     node.action = Action.IDLE
-        node.action = Action.SEND_DATA
+        if(node.action == Action.IDLE): node.action = Action.SEND_DATA
 
     def send_election_msg(self, ni, msg):
         if(msg["type"] == "UPDATE_HEAD"):
@@ -641,16 +648,17 @@ class NetworkModel:
 
                 for ni in self._graph.nodes():
                     node = self._graph.nodes[ni]["node"]
-                    print(ni, node.action, node.waiting)
+                    # if (ni != self._base_station): print(ni, node.action, node.childrenWaiting(), node.await_parent, self._tdma_slot % node.totalSlots == node.tdmaSlot, node.parent.node.id)
 
                     # Send data packet during your TDMA time slot
-                    if (node != self._base_station) and (node.action == Action.SEND_DATA) and \
-                        (self._tdma_slot % node.totalSlots == node.tdmaSlot) and (node.waiting <= 0 or node.timer <= 0):
+                    if (ni != self._base_station) and (node.action == Action.SEND_DATA) and \
+                        (self._tdma_slot % node.totalSlots == node.tdmaSlot) and (node.childrenWaiting() == 0 or node.timer <= 0) and \
+                        (not node.await_parent):
                         # print(node.parent.node.chdList)
                         self.send_data_packet(ni)
                     
                     # Send ACK back to child when they send their data packet
-                    elif (node.action == Action.SEND_DATA_ACK and node.pkt):
+                    elif (node.pkt):
                         self.send_data_ack(node.pkt)
 
                     # Determine to re-elect head or not
@@ -684,7 +692,7 @@ class NetworkModel:
                         if msg != None:
                             # print(ch.id, msg["child"].id)
                             self.spawn_packet(msg, ni, ch.id)
-                            node.action = Action.AWAIT_PARENT
+                            node.await_parent = True
                         else:
                             node.action = Action.ELECTION
                     
@@ -929,7 +937,7 @@ class NetworkModel:
     def observe_parent_potential(self, ni, Oth):
         node = self._graph.nodes[ni]["node"]
         # Check if parent overall score is greater than a threshold
-        print("pot: ", self._graph.nodes[ni]["node"].parent.overall_score)
+        # print("pot: ", self._graph.nodes[ni]["node"].parent.overall_score)
         if(self._graph.nodes[ni]["node"].parent.overall_score > Oth): return None, None
 
         # Parent is dead, move to closest CH
