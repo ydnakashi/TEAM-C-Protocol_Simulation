@@ -24,20 +24,21 @@ STATE_STYLE: dict[NodeType, tuple[str, float, int]] = {
 }
 
 class EnergyConsumption(Enum): # All in joules
-    ENERGY_PER_BIT = 50.0e-9 # j/bit
-    EPSILON_FS = 10.0e-12   # j/bit/m^2
-    ENERGY_DA = 5.0e-9 # nj/bit/signal
-    EPSILON_AMP = 0.0013e-12 # nj/bit/m^4
+    ENERGY_PER_BIT = 50.0 # nj/bit
+    EPSILON_FS = 10.0e-3   # nj/bit/m^2
+    ENERGY_DA = 5.0 # nj/bit/signal
+    EPSILON_AMP = 0.0013e-3 # nj/bit/m^4
 
 @dataclass
 class Child:
     """A node that sends packets to its parent. Seen from the view of the parent."""
     state: NodeType
     tdma_slot: int = -1    # -1 means no slot given
-    # received: bool = False
-    overall_score: float = 0
+    received: bool = False
+    overall_score: float = 1
     L: int = 0
     N: int = 0
+    powerRatio: float = 0.0
 
 class Action(Enum):
     SEND_DATA = auto()
@@ -58,10 +59,11 @@ class Node:
     #     self.overall_score = 100
     #     # self.timeSlot = 0
     #     self.currentBSDist = 1000000000
-    def __init__(self, id, power=0.5, coords=None, bsCoords=None, Rc=2):
+    def __init__(self, id, power=0.5e9, coords=None, bsCoords=None, Rc=2): # power in nanojoules
         self.id: int = id
         self.state: NodeType = None
         self.power: float = power
+        self.powerRatio: float = power/(0.5e9)
         self.coords: tuple[int, int] = tuple(coords) if coords else (0, 0)
         self.worthiness: float = 1
         self.overall_score: float = 1
@@ -79,14 +81,15 @@ class Node:
         self.label=f"Node {self.id}"
       
         self.action = Action.IDLE
-        self.ready_to_send = False
+        self.ready_to_send = True
         self.pkt = None
         self.timer = -1
         self.tdmaSlot = -1  # Default to -1 to represent no slot
         self.totalSlots = -1  # Default to -1 to represent no slot
-        self.waiting = 0
+        # self.waiting = 0
         self.orphan_timer = -1
         self.orphans = {}
+        self.await_parent = False
 
     def broadcast (self, message):
         # print(f"Node {self.id} received:", message)
@@ -107,6 +110,14 @@ class Node:
             for neighbour, dist in self.neighbourList:
                 neighbour.receive(self, message, -1)
                 self.consume_energy(sys.getsizeof(message), dist)
+        
+        # if(message['type'] == "POWERREQ"):
+        #     if self.state == NodeType.DEAD:
+        #         return
+        #     for neighbour, dist in self.broadcastList:
+        #         if neighbour.id in self.chdList:
+        #             neighbour.recieve(self, message)
+
 
     def receive(self, sender, message):
         # helper function
@@ -119,10 +130,10 @@ class Node:
         def float_node(tuples_list, nodeId):
             index = find_index_by_senderId(tuples_list, nodeId)
             if index == -1:
-                return "floating failed"
+                return False
             tup = tuples_list.pop(index)
             tuples_list.insert(0, tup)
-            return None
+            return True
 
         # direct neighbour   
         if message["type"] == "STATE":
@@ -156,7 +167,7 @@ class Node:
         if message["type"] == "CHROUTE":
             if self.state == NodeType.CLUSTER_HEAD or self.state == NodeType.BASE_STATION: 
                 dist = math.sqrt((self.coords[0]-0)**2 + (self.coords[1]- 0)**2)
-                sender.receive(message= {
+                sender.receive(message={
                     "type": "CHRETURN",
                     "dist": dist
                 })
@@ -165,9 +176,33 @@ class Node:
             if message.dist > self.currentBSDist:
                 self.parent.node = sender
 
-        
+        # if message['type'] == "POWERREQ":
+        #     if self.state == NodeType.DEAD:
+        #         return
+
+        #     self.parent.powerRatio = message['parentPower']
+        #     sender.recieve(message = {
+        #         "type": "POWERRETURN",
+        #         "power": self.powerRatio
+        #     })
+
+        # if message['type'] == "POWERRETURN":
+        #     if self.state == NodeType.DEAD:
+        #         return
+        #     self.chdList[sender.id].powerRatio = message["power"]
+           
+            
     def neighbourCount(self):
         return len(self.neighbourList)
+    
+    def childrenWaiting(self):
+        waiting = [c for c in self.chdList.values() if not c.received]
+        # print(self.id, " waiting ", waiting)
+        return len(waiting)
+    
+    def resetWaiting(self):
+        for c in self.chdList.values():
+            c.received = False
 
     # icd used to calcualte twait time
     # euclidan distance of all the nodes in its neighbour array
@@ -195,12 +230,17 @@ class Node:
         else:
             consumption = EnergyConsumption.ENERGY_PER_BIT.value * k + EnergyConsumption.EPSILON_FS.value * k * d**2
         self.power -= consumption
+        self.powerRatio = self.power/(0.5e9)
         if self.power < 0:
             self.power = 0
+            self.powerRatio = 0
+        # if isinstance(self.power, complex):
+        #     self.power = self.power.real
 
 @dataclass
 class Parent:
     node: Node = None
     L: int = 0
     N: int = 0
-    overall_score: float = 0
+    overall_score: float = 1
+    powerRatio: float = 0.0
