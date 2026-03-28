@@ -182,6 +182,7 @@ class Node:
         elif (message['type'] == "POWERREQ"):
             if self.state == NodeType.DEAD:
                 return
+            # print(self.chdList)
             for chd in self.chdList:
                 self.chdList[chd].node.receive(self, message)
                 self.consume_energy(sys.getsizeof(message), self.chdList[chd].distance)
@@ -312,7 +313,7 @@ class Node:
         if self.power < 0:
             self.power = 0
             self.powerPercent = 0
-        print(f"{self.id}: {self.powerPercent}")
+        # print(f"{self.id}: {self.powerPercent}")
 
 @dataclass
 class Child:
