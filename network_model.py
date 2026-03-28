@@ -385,27 +385,27 @@ class NetworkModel:
             # parent node broadcasts a request for all childrens power
             # children recieve it, send it back, and calculate parents score with the broadcasted parent power 
             currNode.broadcast(message={
-                    "type": "POWERREQ",
-                    "parentPower": currNode.powerPercent
-                }, nodes=self.graph.nodes)
+                    'type': 'POWERREQ',
+                    'parentPower': currNode.powerPercent
+                })
                 
             for childId, childObj in currNode.chdList.items():
                 # only calculate the scores if the node isnt dead, otherwise
                 # it takes out the correct dead node and the parent
             
-                currChild = self._graph.nodes[childId]["node"]
+                currChild = childObj.node
                 childWorthiness = 0.5*self.calculate_worthiness_score(childObj.L, childObj.N)
                 # childOverallScore = childWorthiness + (0.5 * childObj.power)
                 # still need a broadcast to get the battery 
                 childObj.overall_score = childWorthiness  #+  0.5 * childObj.powerFlag
                 # child has not been sending or receiving packets this whole time and thus is dead
-                print("child id, parent id, child worthiness ", currChild.id, currNode.id, childWorthiness )
+                # print("child id, parent id, child worthiness ", currChild.id, currNode.id, childWorthiness )
                 if childWorthiness <= 0:
                     # self._to_remove.append(childId)
                     # self._destroyed = childId
                     currChild.state = NodeType.DEAD
                     self._to_remove.add(childId)
-                    print(currChild.id, " destroyed")
+                    # print(currChild.id, " destroyed")
                     continue
                     # parent gives the child their updated score 
                     # child calculates parent score in its own class function
@@ -418,11 +418,6 @@ class NetworkModel:
                     childObj.L = 0
                     childObj.N = 0
              
-                  
-       
-                
-                   
-
     def cleanup_dead_nodes(self):
         for ni in self._graph.nodes:
             if ni == 1:
@@ -468,7 +463,7 @@ class NetworkModel:
                 self._graph.nodes[ni]["node"].state = NodeType.DEAD
     
                 # self._graph.nodes[ni]["node"] = Node(ni)  # wipe the data
-                print("new destorted: ", self._destroyed)
+                # print("new destorted: ", self._destroyed)
                 self._events.append(f"Destroyed nodes: {new_destroyed}")
                 return
 
@@ -815,7 +810,7 @@ class NetworkModel:
         
         # every so often have a chance to destory a node
         # if a node is destoryed, it gets caught in the NEXT NEXT worthiness score (as it would have had some packets being sent before it died)
-        if self._tick % 190 == 0:
+        if self._tick % 150 == 0:
             self.destroy_nodes()
         if self._tick % 200 == 0:   
             self.startWorthinessCalc()

@@ -178,12 +178,13 @@ class Node:
             if self.state == NodeType.CLUSTER_HEAD:
                 for neighbour, dist in self.broadcastList:
                     neighbour.receive(self, message)
+
         elif (message['type'] == "POWERREQ"):
             if self.state == NodeType.DEAD:
                 return
-            # for chd in self.chdList:
-            #     # nodes[chd]['node'].receive(self, message)
-            #     # self.consume_energy(sys.getsizeof(message), dist)
+            for chd in self.chdList:
+                self.chdList[chd].node.receive(self, message)
+                self.consume_energy(sys.getsizeof(message), self.chdList[chd].distance)
 
 
     def receive(self, sender, message):
@@ -277,7 +278,7 @@ class Node:
         # worthiness was 0, child changes parent to dead
         self.parent.L = 0
         self.parent.N = 0
-        print("PARENT WORTHINESS FROM ", self.id, ":", w)
+        # print("PARENT WORTHINESS FROM ", self.id, ":", w)
         if w <= 0: 
             # i think this branch should be unreachable
             print("TEST")
