@@ -1,16 +1,12 @@
 import math
-import networkx as nx
-from node import Node, Child, NodeType
-
+from node import NodeType
 
 # beginning clustering algorithm, to be run at the very start 
 
 # pass in the networksx graph, the max distance of a what a node can hear (default is 20 for now, idk) and the constant used for twait (idk what the default should be)
-def twaitCalculation(graph, Rc=2, alpha=0.5):
+def twaitCalculation(graph, graphX=10, graphY=10, Rc=2, alpha=0.5):
     # the total amount of nodes in the graph
     N = graph.number_of_nodes()
-    # dimensions of the graph, currently hardcoded for now ...
-    x, y = 10, 10
 
     for ni in graph.nodes():      
         node = graph.nodes[ni]["node"]
@@ -35,10 +31,9 @@ def twaitCalculation(graph, Rc=2, alpha=0.5):
                 node.broadcastList.append((other, dist))
             elif dist <= 3 * Rc:
                 node.relayList.append((other, dist))
-                
 
     # nodes to cluster ratio
-    NC = x * y / (Rc) ** 2
+    NC = graphX * graphY / (Rc) ** 2
     NNavg = N / NC
 
     # twait calculations
@@ -62,7 +57,6 @@ def twaitCalculation(graph, Rc=2, alpha=0.5):
             twait = alpha * (ICDi / Rc) + (1 - alpha) * \
                 (1 - (NNi / N))
         node.twait = twait
-    # createClusters(graph)
 
 def stateSelection(graph):    
     sortedNodes = sorted(graph.nodes(), key=lambda n: graph.nodes[n]["node"].twait)
@@ -85,6 +79,20 @@ def stateSelection(graph):
                 "sender": node.id,
                 "state": NodeType.IRRESOLUTE
                 })
+
+# def stateSelection(graph):    
+#     sortedNodes = sorted(graph.nodes(), key=lambda n: graph.nodes[n]["node"].twait)
+#     # State setting based on twait
+#     for n in sortedNodes:
+#         node = graph.nodes[n]["node"]
+#         node.select_state()
+
+# def clusterCreation(graph, baseStationId):
+#     sortedNodes = sorted(graph.nodes(), key=lambda n: graph.nodes[n]["node"].twait)
+#     bsNode = graph.nodes[baseStationId]['node']
+#     for n in sortedNodes:
+#         node = graph.nodes[n]['node']
+#         node.select_parent(bsNode)
 
 def clusterCreation(graph, baseStationId):
     print("starting clusters")

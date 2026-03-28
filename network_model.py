@@ -673,9 +673,9 @@ class NetworkModel:
         if (self._tick % self._spawn_interval == 0):
 
             if(self._phase == Phase.INIT_ROLES):
-                twaitCalculation(self._graph)
-                stateSelection(self._graph)
-                clusterCreation(self._graph, self.base_station)
+                self.twaitCalculation()
+                self.stateSelection()
+                self.clusterCreation()
 
                 self.init_TDMA()
                 self.redo_edges()
@@ -798,6 +798,70 @@ class NetworkModel:
         x1, y1 = a.coords
         x2, y2 = b.coords
         return ((x1-x2)**2 + (y1-y2)**2)** 0.5
+    
+    def twaitCalculation(self, graphX=10, graphY=10, Rc=2, alpha=0.5):
+        # the total amount of nodes in the graph
+        N = self._graph.number_of_nodes()
+
+        for ni in self._graph.nodes():      
+            node = self._graph.nodes[ni]["node"]
+        
+            for oi in self._graph.nodes():
+                other = self._graph.nodes[oi]["node"]
+                # check that the node is not itself
+                if node == other :
+                    continue
+               
+                dist = self.dist(node, other)
+
+                if dist <= Rc:
+                    node.neighbourList.append((other, dist))
+                # only nodes that are within the multipled distance but outside of Rc are added
+                elif dist <= (3/2) * Rc:
+                    node.broadcastList.append((other, dist))
+                elif dist <= 3 * Rc:
+                    node.relayList.append((other, dist))
+
+        # nodes to cluster ratio
+        NC = graphX * graphY / (Rc) ** 2
+        NNavg = N / NC
+
+        # twait calculations
+        for ni in self._graph.nodes():
+            node = self._graph.nodes[ni]["node"]
+            NNi = len(node.neighbourList)
+
+            if NNi == 0:
+                node.twait = 1000
+                continue
+
+            # icd compute
+            total_dist = sum(dist for (_, dist) in node.neighbourList)
+            ICDi = total_dist / NNi
+            # print("ICDI: " ,ICDi)
+
+            if NNi > NNavg:
+                twait = alpha * (ICDi / Rc) + (1 - alpha) * \
+                    (1 - (NNi / N)) * (1 - ((NNi - NNavg) / N))
+            else:
+                twait = alpha * (ICDi / Rc) + (1 - alpha) * \
+                    (1 - (NNi / N))
+            node.twait = twait
+
+    def stateSelection(self):    
+        sortedNodes = sorted(self._graph.nodes(), key=lambda n: self._graph.nodes[n]["node"].twait)
+        # State setting based on twait
+        for n in sortedNodes:
+            node = self._graph.nodes[n]["node"]
+            if node.state == NodeType.ASLEEP: node.state = NodeType.AWAKE
+            node.select_state()
+
+    def clusterCreation(self):
+        sortedNodes = sorted(self._graph.nodes(), key=lambda n: self._graph.nodes[n]["node"].twait)
+        bsNode = self._graph.nodes[self._base_station]['node']
+        for n in sortedNodes:
+            node = self._graph.nodes[n]['node']
+            node.select_parent(bsNode)
 
     # Current CH or S_CH enters the head update phase
     def elect_new_head(self, ni, Eth):
