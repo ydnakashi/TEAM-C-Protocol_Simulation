@@ -189,7 +189,7 @@ class Node:
         if (message['type'] == "POWERREQ"):
             if self.state == NodeType.DEAD:
                 return
-            print(self.chdList)
+            # print(self.chdList)
             for chd in self.chdList:
                 self.chdList[chd].node.receive(self, message)
 
@@ -305,7 +305,7 @@ class Node:
         if self.power < 0:
             self.power = 0
             self.powerPercent = 0
-        print(f"{self.id}: {self.powerPercent}")
+        # print(f"{self.id}: {self.powerPercent}")
 
 @dataclass
 class Child:
