@@ -65,14 +65,7 @@ class Node:
 
         self.twait = 0
         self.Rc = Rc
-        
-        # For simulation purposes
-        self.neighbourList: list[tuple[Node, float]] = []   # (node object, node distance from self) for all nodes of radius <= Rc
-        self.broadcastList: list[tuple[Node, float]] = []   # (node object, node distance from self) for all nodes of radius <= 3/2*Rc
-        self.relayList: list[tuple[Node, float]] = []       # (node object, node distance from self) for all nodes of radius <= 3*Rc
-        self.label=f"Node {self.id}"
 
-        # Other      
         self.action = Action.IDLE
         self.ready_to_send = True
         self.pkt = None
@@ -83,6 +76,12 @@ class Node:
         self.orphan_timer = -1
         self.orphans = {}
         self.await_parent = False
+
+        # For simulation purposes
+        self.neighbourList: list[tuple[Node, float]] = []   # (node object, node distance from self) for all nodes of radius <= Rc
+        self.broadcastList: list[tuple[Node, float]] = []   # (node object, node distance from self) for all nodes of radius <= 3/2*Rc
+        self.relayList: list[tuple[Node, float]] = []       # (node object, node distance from self) for all nodes of radius <= 3*Rc
+        self.label=f"Node {self.id}"
 
     def send_sensor_data(self):
         message = {
@@ -115,7 +114,7 @@ class Node:
             self.consume_energy(sys.getsizeof(msg), self.Rc)
         else:
             return
-        # don't use send function here since it issues one state message to a hide area
+        # don't use send function here since it issues one state message to a wide area
         for node in nodeList:
             node.receive(self, msg)
 
@@ -179,14 +178,7 @@ class Node:
             if self.state == NodeType.CLUSTER_HEAD:
                 for neighbour, dist in self.broadcastList:
                     neighbour.receive(self, message)
-        if(message['type'] == "MEMBERJOIN"):
-            self.parent.node.receive(self, message)
-
-        if(message['type'] == "CHROUTE"):
-            for neighbour, dist in self.neighbourList:
-                neighbour.receive(self, message, -1)
-        
-        if (message['type'] == "POWERREQ"):
+        elif (message['type'] == "POWERREQ"):
             if self.state == NodeType.DEAD:
                 return
             print(self.chdList)
@@ -236,18 +228,6 @@ class Node:
                 x=message['coords'][0],
                 y=message['coords'][1],
                 distance=dist)
-
-        if message["type"] == "CHROUTE":
-            if self.state == NodeType.CLUSTER_HEAD or self.state == NodeType.BASE_STATION: 
-                dist = math.sqrt((self.coords[0]-0)**2 + (self.coords[1]- 0)**2)
-                sender.receive(message={
-                    "type": "CHRETURN",
-                    "dist": dist
-                })
-                
-        if message["type"] == "CHRETURN":
-            if message.dist > self.currentBSDist:
-                self.parent.node = sender
 
         if message['type'] == "POWERREQ":
             if self.state == NodeType.DEAD:
