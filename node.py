@@ -91,7 +91,7 @@ class Node:
         self.orphans = {}
         self.await_parent = False
 
-    def broadcast (self, message):
+    def broadcast (self, message, nodes=None):
         # print(f"Node {self.id} received:", message)
 
         # get all nodes within the Rc distance
@@ -111,13 +111,13 @@ class Node:
                 neighbour.receive(self, message, -1)
                 self.consume_energy(sys.getsizeof(message), dist)
         
-        # if(message['type'] == "POWERREQ"):
-        #     if self.state == NodeType.DEAD:
-        #         return
-        #     for neighbour, dist in self.broadcastList:
-        #         if neighbour.id in self.chdList:
-        #             neighbour.recieve(self, message)
-
+        if (message['type'] == "POWERREQ"):
+            if self.state == NodeType.DEAD:
+                return
+            print(self.chdList)
+            for chd in self.chdList:
+                nodes[chd]['node'].receive(self, message)
+                # self.consume_energy(sys.getsizeof(message), dist)
 
     def receive(self, sender, message):
         # helper function
@@ -176,21 +176,22 @@ class Node:
             if message.dist > self.currentBSDist:
                 self.parent.node = sender
 
-        # if message['type'] == "POWERREQ":
-        #     if self.state == NodeType.DEAD:
-        #         return
+        if message['type'] == "POWERREQ":
+            if self.state == NodeType.DEAD:
+                return
 
-        #     self.parent.powerRatio = message['parentPower']
-        #     sender.recieve(message = {
-        #         "type": "POWERRETURN",
-        #         "power": self.powerRatio
-        #     })
+            self.parent.powerRatio = message['parentPower']
 
-        # if message['type'] == "POWERRETURN":
-        #     if self.state == NodeType.DEAD:
-        #         return
-        #     self.chdList[sender.id].powerRatio = message["power"]
-           
+            sender.receive(self, message={
+                "type": "POWERRETURN",
+                "power": self.powerRatio
+            })
+
+        elif message['type'] == "POWERRETURN":
+            if self.state == NodeType.DEAD:
+                return
+            self.chdList[sender.id].powerRatio = message["power"]
+                
             
     def neighbourCount(self):
         return len(self.neighbourList)
@@ -216,9 +217,6 @@ class Node:
 
         return total / len(self.neighbourList)
     
-    def calculateWorthiness(self):
-        print('test')
-
     def consume_energy(self, k: int, d: float) -> None:
         consumption = 0.0
         if self.state == NodeType.BASE_STATION:
@@ -236,6 +234,7 @@ class Node:
             self.powerRatio = 0
         # if isinstance(self.power, complex):
         #     self.power = self.power.real
+
 
 @dataclass
 class Parent:
