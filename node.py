@@ -63,7 +63,7 @@ class Node:
         self.id: int = id
         self.state: NodeType = None
         self.power: float = power
-        self.powerRatio: float = power/(0.5e9)
+        self.powerRatio: float = power/(0.5e9) 
         self.coords: tuple[int, int] = tuple(coords) if coords else (0, 0)
         self.worthiness: float = 1
         self.overall_score: float = 1

@@ -375,11 +375,14 @@ class NetworkModel:
                 # the actual child node
                 currChild = self._graph.nodes[childId]["node"]
                 # current weights are just 1, 1 
-                childWorthiness = (alpha*self.calculate_worthiness_score(childObj.L, childObj.N)) + beta*currChild.powerRatio
+                # childWorthiness = (alpha*self.calculate_worthiness_score(childObj.L, childObj.N)) + beta*currChild.powerRatio
+                childWorthiness = currChild.powerRatio
                 childObj.overall_score=childWorthiness
                
                 # child calculates its parents worthiness
-                parentWorthiness =  (alpha * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + beta * currChild.powerRatio
+                # parentWorthiness =  (alpha * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + beta * currChild.powerRatio
+                parentWorthiness =  currChild.powerRatio
+
                 # if parent worthiness has been 0 three times in a row, node is destoryed? Or just as soon as it's 0 its dead
                 currChild.parent.overall_score = parentWorthiness
                 currChild.worthiness = childWorthiness
@@ -388,12 +391,12 @@ class NetworkModel:
                 #     currChild.parent == None
                 #     currChild.action = Action.ORPHAN_ELECTION
                 print("Worthiness ", childWorthiness, parentWorthiness)
-                childObj.L = 0
-                childObj.N = 0
-                childObj.powerRatio = 0
-                currChild.parent.L = 0
-                currChild.parent.N = 0
-                currChild.parent.powerRatio = 0
+                # childObj.L = 0
+                # childObj.N = 0
+                # childObj.powerRatio = 0
+                # currChild.parent.L = 0
+                # currChild.parent.N = 0
+                # currChild.parent.powerRatio = 0
             
             for n in remove:
                 currNode.chdList.pop(n, None)
