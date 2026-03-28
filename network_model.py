@@ -140,7 +140,7 @@ class NetworkModel:
         self._active: list[Node] = []
         self._tdma_slot: int = 0
         self._phase: Phase = Phase.INIT_ROLES  # Change this 
-        self._loss_interval: int = 6   # change this later
+        self._loss_interval: int = 5   # change this later
         self._destroyed_prob: dict = {}
         self._destroyed: list[int] = []
         self._recieved_poweracks: int = 0
@@ -349,7 +349,8 @@ class NetworkModel:
         return node
     
     def calculate_worthiness_score(self, L, N, c=1):
-        if(N == 0 or L > N): return 1
+        if(N == 0): return 0
+        if(L > N): return 1
         t = L/N
         r = 1 - (((12*L*(N-L))**0.5) / ((N+1)*N))
         w = 1 - (((t-1)**2 + (c**2) * (r-1)**2)**0.5 / (1+c**2)**0.5)
@@ -400,17 +401,17 @@ class NetworkModel:
                     # parent never broadcasted back
                     remove.append(currChild.parent.node.id)
                     self._destroyed.append(currChild.parent.node.id)
-                    currChild.parent = None
+                    currChild.parent = Parent()
                     currChild.state = Action.ORPHAN_ELECTION
                 else:
                     currChild.parent.L = 0
                     currChild.parent.N = 0
-                    currChild.parent.powerRatio = 0
+                    # currChild.parent.powerRatio = 0
 
                 print("Worthiness ", childWorthiness, parentWorthiness)
                 childObj.L = 0
                 childObj.N = 0
-                childObj.powerRatio = 0
+                # childObj.powerRatio = 0
             
             for n in remove:
                 currNode.chdList.pop(n, None)
@@ -530,10 +531,11 @@ class NetworkModel:
                         )
 
                     node = self._graph.nodes[pkt.destination]["node"]
+                    if(pkt.destination in self._destroyed): continue   # don't do anything if node is destroyed
                    
                     if(pkt.content["type"] == "DATA_MSG"):
                         # node.chdList[pkt.source].received = True
-                        node.action = Action.SEND_DATA_ACK  # send ACK back
+                        # node.action = Action.SEND_DATA_ACK  # send ACK back
                         node.pkt = pkt
                         # node.waiting-=1 
 
@@ -593,16 +595,12 @@ class NetworkModel:
     def send_data_packet(self, ni):
         node = self._graph.nodes[ni]["node"]
         # print(ni, node.parent.node.id, node.parent.node.chdList)
-        # print(ni, node.parent.node.id, node.parent.node.chdList)
-        if ni not in node.parent.node.chdList:
-            return
 
-        if node.parent == None:
-            return
-        if ni not in node.parent.node.chdList:
+        if (node.parent.node == None) or (ni not in node.parent.node.chdList):
             return
         node.parent.node.chdList[ni].N += 1  # parent observes that the child should be sending a packet in this time slot
 
+        print(self._destroyed)
         if (ni not in self._destroyed):
             node.parent.N += 1
 
@@ -701,7 +699,7 @@ class NetworkModel:
 
                 for ni in self._graph.nodes():
                     node = self._graph.nodes[ni]["node"]
-                    # if (ni != self._base_station): print(ni, node.action, node.childrenWaiting(), node.await_parent, self._tdma_slot % node.totalSlots == node.tdmaSlot, node.parent.node.id)
+                    # if (ni != self._base_station): print(ni, node.action, node.childrenWaiting(), node.timer, node.await_parent, self._tdma_slot % node.totalSlots == node.tdmaSlot, node.parent.node.id)
                     if node.state == NodeType.DEAD:
                         continue
 
@@ -787,7 +785,7 @@ class NetworkModel:
 
         if self._tick % 250 == 0:
             self.startWorthinessCalc()
-        if self._tick % 60 == 0:
+        # if self._tick % 60 == 0:
             self.destroy_nodes()
 
         # self.destroy_nodes()
