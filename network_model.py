@@ -171,14 +171,14 @@ class NetworkModel:
                 if dist > 0:
                     self._graph.add_edge(i + 1, j + 1, weight=dist)
 
-    def build_from_coordinates(self, coords: list[tuple[float, float]], link_range: float = 1.5) -> None:
+    def build_from_coordinates(self, coords: list[tuple[float, float]], link_range: float = 2.0) -> None:
         self._graph.clear()
         n = len(coords)
         for i in range(n):
             node_id = i + 1  
       
-            randomBattery = randomizeBattery(2)
-            self._graph.add_node(i+1, label=f"Node{i+1}", node=(Node(node_id, randomBattery,[coords[i][0], coords[i][1]]))
+            randomBattery = randomizeBattery(node_id)
+            self._graph.add_node(i+1, label=f"Node{i+1}", node=(Node(id=node_id, powerPercent=randomBattery,coords=[coords[i][0], coords[i][1]], Rc=link_range))
             )
         # self._graph.add_node(Node())
         for i in range(n):

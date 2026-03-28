@@ -135,7 +135,7 @@ class WirelessSimulator(tk.Tk):
                    insertbackground=FG, relief="flat").pack(side="left", padx=(4, 12))
 
         tk.Label(top, text="Link Range:", font=FONT_BOLD, bg=BG, fg=FG).pack(side="left")
-        self.range_var = tk.StringVar(value="1.5")
+        self.range_var = tk.StringVar(value="2.0")
         tk.Spinbox(top, from_=0.5, to=50.0, increment=0.5, width=5,
                    textvariable=self.range_var,
                    font=FONT, bg=ENTRY_BG, fg=FG, buttonbackground=BTN_BG,
