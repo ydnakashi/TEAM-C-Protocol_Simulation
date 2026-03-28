@@ -163,8 +163,8 @@ class Node:
         self.send(msg, self.parent.node, self.parent.distance)
 
     def send(self, message: dict, recipient: Node, distance: float):
-        recipient.receive(self, message)
         self.consume_energy(sys.getsizeof(message), distance)
+        recipient.receive(self, message)
     
     def broadcast(self, message):
         # get all nodes within the Rc distance
