@@ -143,6 +143,7 @@ class NetworkModel:
         self._loss_interval: int = 5   # change this later
         self._destroyed_prob: dict = {}
         self._destroyed: list[int] = []
+        self._to_remove: set[int] = set()
         self._recieved_poweracks: int = 0
         self._received_packets_at_BS: int = 0
         self._throughputs = []
@@ -371,55 +372,79 @@ class NetworkModel:
                 }
                 pkt = self.spawn_packet(msg, id, child)
     
+ 
     def startWorthinessCalc(self):
         parents = self.get_parent_nodes() 
         for id in parents:
             currNode = self._graph.nodes[id]["node"]
-            currNode.broadcast(message={
-                        "type": "POWERREQ",
-                        "parentPower": currNode.powerPercent
-                    }, 
-                )
-            currNode = self._graph.nodes[id]["node"]
-            remove = []
-            for childId, childObj in currNode.chdList.items():
-                if childId in self._destroyed:
-                    remove.append(childId)
-                    continue
-                # the actual child node
-                currChild = self._graph.nodes[childId]["node"]
-                if childObj.powerPercent == 0:
-                    remove.append(childId)
-                    self._destroyed.append(childId)
-                    currNode.totalSlots -=1
-                    # never got a power message back, node is dead
-                childWorthiness = (0.5*self.calculate_worthiness_score(childObj.L, childObj.N)) + 0.5* childObj.powerPercent/100
-                childObj.overall_score=childWorthiness
-               
-                # child calculates its parents worthiness
-                parentWorthiness =  (0.5 * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + 0.5 * currNode.powerPercent/100
-                currChild.parent.overall_score = parentWorthiness
-                currChild.overall_score = childWorthiness
-                if currChild.parent.powerPercent == 0: 
-                    # parent never broadcasted back
-                    remove.append(currChild.parent.node.id)
-                    self._destroyed.append(currChild.parent.node.id)
-                    # currChild.parent = Parent()
-                    currChild.state = Action.ORPHAN_ELECTION
-                else:
-                    currChild.parent.L = 0
-                    currChild.parent.N = 0
-                    # currChild.parent.powerRatio = 0
-
-                print("Worthiness ", childWorthiness, parentWorthiness)
-                childObj.L = 0
-                childObj.N = 0
-                # childObj.powerRatio = 0
+            # a child has indicated that the node is dead
+            # if currNode.state == NodeType.DEAD:
+            #     self._to_remove.add(currNode.id)
+            #     continue
             
-            for n in remove:
-                currNode.chdList.pop(n, None)
+            # parent node broadcasts a request for all childrens power
+            # children recieve it, send it back, and calculate parents score with the broadcasted parent power 
+            currNode.broadcast(message={
+                    "type": "POWERREQ",
+                    "parentPower": currNode.powerPercent
+                }, nodes=self.graph.nodes)
+                
+            for childId, childObj in currNode.chdList.items():
+                # only calculate the scores if the node isnt dead, otherwise
+                # it takes out the correct dead node and the parent
+            
+                currChild = self._graph.nodes[childId]["node"]
+                childWorthiness = 0.5*self.calculate_worthiness_score(childObj.L, childObj.N)
+                # childOverallScore = childWorthiness + (0.5 * childObj.power)
+                # still need a broadcast to get the battery 
+                childObj.overall_score = childWorthiness  #+  0.5 * childObj.powerFlag
+                # child has not been sending or receiving packets this whole time and thus is dead
+                print("child id, parent id, child worthiness ", currChild.id, currNode.id, childWorthiness )
+                if childWorthiness <= 0:
+                    # self._to_remove.append(childId)
+                    # self._destroyed = childId
+                    currChild.state = NodeType.DEAD
+                    self._to_remove.add(childId)
+                    print(currChild.id, " destroyed")
+                    continue
+                    # parent gives the child their updated score 
+                    # child calculates parent score in its own class function
+                if currChild.parent != None:
+                    currChild.receive(sender=currChild.parent.node,
+                        message = {
+                            "type": "UPDATESCORE",
+                            "childworth": childObj.overall_score
+                        })
+                    childObj.L = 0
+                    childObj.N = 0
+             
+                  
+       
+                
+                   
+
+    def cleanup_dead_nodes(self):
+        for ni in self._graph.nodes:
+            if ni == 1:
+                continue
+            node = self._graph.nodes[ni]["node"]
+            if node.id in self._to_remove:
+                self._destroyed.append(node.id)
+    
+                if node.parent is not None:
+                    node.parent.node.chdList.pop(node.id, None)
+
+                for childId in list(node.chdList.keys()):
+                    child = self._graph.nodes[childId]["node"]
+                    child.parent = None
+                    # child.action = Action.ORPHAN_ELECTION
+                    child.await_parent = False
+        
+        self._to_remove.clear()
         self.redo_edges()
-                    
+
+        # self._graph.remove_node(ni)
+
     
     def init_destruction_probabilities(self, max=40):
         """Initialize destruction probabilities (0-100) for each node"""
@@ -429,25 +454,29 @@ class NetworkModel:
 
     def destroy_nodes(self):
         """Randomly destroy nodes based on their probabilities"""
-        # cap at 6
-        if(len(self._destroyed) >= 6):
+        # cap at 5
+        if len(self._destroyed) > 4:
             return
         new_destroyed = []
         for ni, prob in self._destroyed_prob.items():
             if (random.randrange(0, 100)) < prob and (ni not in self._destroyed):
-                self._destroyed.append(ni)
+                # self._destroyed.append(ni)
                 self._graph.nodes[ni]["node"].timer = -1
                 self._graph.nodes[ni]["node"].power = 0
                 new_destroyed.append(ni)
+                # self._destroyed.append(self._graph.nodes[ni]["node"].id)
                 self._graph.nodes[ni]["node"].state = NodeType.DEAD
+    
                 # self._graph.nodes[ni]["node"] = Node(ni)  # wipe the data
-        print("destroyed: ", self._destroyed)
-        self._events.append(f"Destroyed nodes: {new_destroyed}")
+                print("new destorted: ", self._destroyed)
+                self._events.append(f"Destroyed nodes: {new_destroyed}")
+                return
 
     def target_destroy(self, id):
-        self._destroyed.append(id)
+        # self._destroyed.append(id)
         self._graph.nodes[id]["node"].timer = -1
         self._graph.nodes[id]['node'].power = 0
+        # self._destroyed.append(self._graph.nodes[id]["node"].id)
         self._graph.nodes[id]['node'].state = NodeType.DEAD
         # self._graph.nodes[ni]["node"] = Node(ni)  # wipe the data
         print("destroyed: ", self._destroyed)
@@ -517,7 +546,7 @@ class NetworkModel:
         for pkt in self._packets:
             if pkt.status != PacketStatus.IN_TRANSIT:
                 continue
-
+            
             pkt.progress += SPEED
 
             while pkt.progress >= 1.0 and pkt.status == PacketStatus.IN_TRANSIT:
@@ -562,10 +591,13 @@ class NetworkModel:
 
                     elif(pkt.content["type"] == "DATA_ACK"):
                         # node.p_rcvd = True
-                        if(not node.await_parent):  node.action = Action.ORPHAN_ELECTION
-                        
-                        if not node.parent == None:
-                            node.parent.L += 1
+                        if node.parent is None:
+                            pkt.status = PacketStatus.DROPPED
+                            continue
+
+                        if(not node.await_parent):  node.action = Action.ORPHAN_ELECTION    
+
+                        node.parent.L += 1
                         # node.action = Action.ELECTION
                         node.ready_to_send = True
 
@@ -598,18 +630,16 @@ class NetworkModel:
                                                          overall_score=self._graph.nodes[pkt.source]["node"].overall_score)
                         node.action = Action.AWAIT_REQS
 
-                    # CH requests battery life from a child for worthiness score
-                   
                        
     def send_data_packet(self, ni):
         node = self._graph.nodes[ni]["node"]
         # print(ni, node.parent.node.id, node.parent.node.chdList)
 
-        if (node.parent.node == None) or (ni not in node.parent.node.chdList):
+        if (node.parent == None) or (ni not in node.parent.node.chdList):
             return
         node.parent.node.chdList[ni].N += 1  # parent observes that the child should be sending a packet in this time slot
 
-        print(self._destroyed)
+        # print(self._destroyed)
         if (ni not in self._destroyed):
             node.parent.N += 1
 
@@ -635,7 +665,7 @@ class NetworkModel:
             node.action = Action.IDLE
             return
 
-        if(node.timer == -1):
+        if(node.timer <= -1):
             node.timer = self._loss_interval * len(node.chdList)
 
         # node.waiting-=1 
@@ -691,7 +721,8 @@ class NetworkModel:
                 self.init_destruction_probabilities()
                 self.init_actions()
                 # use the same number to get the same seeded random battery life
-                # self.target_destroy(10)
+                self.randomizeBattery(1)
+                # self.target_destroy(4)
                 self._phase = Phase.ROUTING
             else:
 
@@ -699,8 +730,11 @@ class NetworkModel:
 
                 for ni in self._graph.nodes():
                     node = self._graph.nodes[ni]["node"]
+                    node.timer -=1
                     # if (ni != self._base_station): print(ni, node.action, node.childrenWaiting(), node.timer, node.await_parent, self._tdma_slot % node.totalSlots == node.tdmaSlot, node.parent.node.id)
                     if node.state == NodeType.DEAD:
+                        continue
+                    if node.id in self._destroyed:
                         continue
 
                     # Send data packet during your TDMA time slot
@@ -741,7 +775,7 @@ class NetworkModel:
                         (self._tdma_slot % node.totalSlots == node.tdmaSlot):
 
                         msg, ch = self.observe_parent_potential(ni, 0)   # Random threshold for now
-                        print("orphan: ", msg)
+                        # print("orphan: ", msg)
                         if msg != None:
                             # print(ch.id, msg["child"].id)
                             self.spawn_packet(msg, ni, ch.id)
@@ -776,22 +810,16 @@ class NetworkModel:
                         #     # if(node.ready_to_send): node.action = Action.SEND_DATA
                         #     continue
                         # self.send_election_msg(ni, msg)
-
-        # current time period = 500 ticks? maybe less? idk
         # for ni in self._graph.nodes(): 
         #     print(self._graph.nodes[ni]["node"].id, self._graph.nodes[ni]["node"].state)
         
         # every so often have a chance to destory a node
-
-        if self._tick % 250 == 0:
-            self.startWorthinessCalc()
-            self.throughput()   # calculate throughput per 250 ticks
-        # if self._tick % 60 == 0:
+        # if a node is destoryed, it gets caught in the NEXT NEXT worthiness score (as it would have had some packets being sent before it died)
+        if self._tick % 190 == 0:
             self.destroy_nodes()
-
-        if self._tick % 50 == 0:
-            if(self.network_dead()): dead = True
-            self._delivered_interval = 0   # reset interval to determine when network dies
+        if self._tick % 200 == 0:   
+            self.startWorthinessCalc()
+            self.cleanup_dead_nodes()
 
         # self.destroy_nodes()
         self.move_packets()
@@ -1067,9 +1095,10 @@ class NetworkModel:
         node = self._graph.nodes[ni]["node"]
         # Check if parent overall score is greater than a threshold
         # print("pot: ", self._graph.nodes[ni]["node"].parent.overall_score)
-
-        if node.parent != None:
-            if(self._graph.nodes[ni]["node"].parent.overall_score > Oth): return None, None
+      
+        if node in self._destroyed:
+            return
+        if(self._graph.nodes[ni]["node"].parent.overall_score > Oth): return None, None
 
         # Parent is dead, move to closest CH
         closest_CH = self.find_closest_CH(node)
@@ -1142,6 +1171,17 @@ class NetworkModel:
             remove_ids = {p.packet_id for p in delivered[:-keep_last]}
             self._packets = [p for p in self._packets
                              if p.packet_id not in remove_ids]
+
+
+    # this is seeded randomness
+    def randomizeBattery(self, seed):
+        random.seed(seed)
+        # cap the battery at 45%
+        battery = [random.randint(45, 100) for _ in range(20)]
+
+        for ni in self._graph.nodes:
+            self._graph.nodes[ni]['node'].power = battery[ni]
+            self._graph.nodes[ni]['node'].powerRatio =  self._graph.nodes[ni]['node'].power /(0.5e9)
 
     
     # Statistics Collection Functions

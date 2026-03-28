@@ -181,11 +181,12 @@ class Node:
         elif (message['type'] == "POWERREQ"):
             if self.state == NodeType.DEAD:
                 return
-            print(self.chdList)
-            for chd in self.chdList:
-                self.chdList[chd].node.receive(self, message)
+            # for chd in self.chdList:
+            #     # nodes[chd]['node'].receive(self, message)
+            #     # self.consume_energy(sys.getsizeof(message), dist)
 
-    def receive(self, sender, message: dict):
+
+    def receive(self, sender, message):
         # helper function
         def float_node(tuples_list, nodeId):
             index = find_index_by_id(tuples_list, nodeId)
@@ -239,9 +240,13 @@ class Node:
                 "type": "POWERRETURN",
                 "power": self.powerPercent
             })
-
+       
         elif message['type'] == "POWERRETURN":
-            if self.state == NodeType.DEAD:
+            if sender.id in self.chdList:
+                self.chdList[sender.id].powerFlag = message["power"]  
+
+        elif (message['type'] == "UPDATESCORE"):
+            if self.state == NodeType.DEAD or self.power <=0:
                 return
             self.chdList[sender.id].powerPercent = message["power"]
                 
@@ -257,6 +262,27 @@ class Node:
     def resetWaiting(self):
         for c in self.chdList.values():
             c.received = False
+    
+    def calculate_parent_worthiness(self, c=1):
+        if self.parent.node == None:
+            return
+        
+        if(self.parent.N == 0): return 0
+        if(self.parent.L > self.parent.N):
+            self.parent.overall_score = 1
+            return
+        t = self.parent.L/self.parent.N
+        r = 1 - (((12* self.parent.L*(self.parent.N- self.parent.L))**0.5) / ((self.parent.N+1)*self.parent.N))
+        w = 1 - (((t-1)**2 + (c**2) * (r-1)**2)**0.5 / (1+c**2)**0.5)
+        # worthiness was 0, child changes parent to dead
+        self.parent.L = 0
+        self.parent.N = 0
+        print("PARENT WORTHINESS FROM ", self.id, ":", w)
+        if w <= 0: 
+            # i think this branch should be unreachable
+            print("TEST")
+        else:
+            self.parent.overall_score = w + (0.5*self.parent.powerFlag)
 
     # icd used to calcualte twait time
     # euclidan distance of all the nodes in its neighbour array
