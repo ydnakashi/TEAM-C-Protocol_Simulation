@@ -349,7 +349,7 @@ class NetworkModel:
         return node
     
     def calculate_worthiness_score(self, L, N, c=1):
-        if(N==0): return 0
+        if(N == 0 or L > N): return 1
         t = L/N
         r = 1 - (((12*L*(N-L))**0.5) / ((N+1)*N))
         w = 1 - (((t-1)**2 + (c**2) * (r-1)**2)**0.5 / (1+c**2)**0.5)
@@ -393,8 +393,7 @@ class NetworkModel:
                 childObj.overall_score=childWorthiness
                
                 # child calculates its parents worthiness
-                # parent doesnt keep a copy of the child node
-                parentWorthiness =  (1 * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + 0 * currChild.parent.powerRatio
+                parentWorthiness =  (0.5 * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + 0.5 * currNode.powerRatio
                 currChild.parent.overall_score = parentWorthiness
                 currChild.worthiness = childWorthiness
                 if currChild.parent.powerRatio == 0: 
@@ -558,7 +557,6 @@ class NetworkModel:
                             node.parent.L += 1
                         # node.action = Action.ELECTION
                         node.ready_to_send = True
-                        # self.startWorthinessCalc()
 
                     elif(pkt.content["type"] == "UPDATE_HEAD"):
                         self.update_new_head(pkt.destination, pkt.content)
@@ -582,10 +580,11 @@ class NetworkModel:
 
                     elif(pkt.content["type"] == "REQUEST_PARENT"):
                         # node waits a certain amount of time before doing elect_head_orphan?
-                        if(node.orphan_timer == -1): node.orphan_timer = 5   # set to something
+                        if(node.orphan_timer == -1): node.orphan_timer = self._loss_interval   # set to something
                         # else: node.orphan_timer -= 1
                         # adds all the pkt.sources to a list
-                        node.orphans[pkt.source] = Child(self._graph.nodes[pkt.source]["node"].state)
+                        node.orphans[pkt.source] = Child(self._graph.nodes[pkt.source]["node"].state, 
+                                                         overall_score=self._graph.nodes[pkt.source]["node"].overall_score)
                         node.action = Action.AWAIT_REQS
 
                     # CH requests battery life from a child for worthiness score
@@ -595,6 +594,8 @@ class NetworkModel:
         node = self._graph.nodes[ni]["node"]
         # print(ni, node.parent.node.id, node.parent.node.chdList)
         # print(ni, node.parent.node.id, node.parent.node.chdList)
+        if ni not in node.parent.node.chdList:
+            return
 
         if node.parent == None:
             return
@@ -726,7 +727,7 @@ class NetworkModel:
                             # if(node.ready_to_send): node.action = Action.SEND_DATA
                             continue
                         
-                        msg = self.elect_new_head(ni, 0.1)   # Random threshold for now
+                        msg = self.elect_new_head(ni, 0)   # Random threshold for now
                         print("election: ", msg)
                         if msg == None: 
                             # send no_election? small packet to tell them to continue sending data
@@ -740,8 +741,8 @@ class NetworkModel:
                         self.send_election_msg(ni, msg)
                     elif (node.action == Action.ORPHAN_ELECTION) and \
                         (self._tdma_slot % node.totalSlots == node.tdmaSlot):
-                    
-                        msg, ch = self.observe_parent_potential(ni, 0.1)   # Random threshold for now
+
+                        msg, ch = self.observe_parent_potential(ni, 0)   # Random threshold for now
                         print("orphan: ", msg)
                         if msg != None:
                             # print(ch.id, msg["child"].id)
@@ -760,30 +761,31 @@ class NetworkModel:
                             orph_msg = {
                                 "chdList": node.orphans
                             }
-                            msg = self.elect_new_head_orphans(ni, orph_msg, 0.1)  # random threshold for now
+                            msg = self.elect_new_head_orphans(ni, orph_msg, 0)  # random threshold for now
                             if(msg == None): self.send_ready_msg(ni)
                             else: 
                                 self.send_election_msg(ni, msg)
                                 print(msg["newHead"])
                             node.action = Action.ELECTION
 
-                        msg = self.elect_new_head(ni, 0.1)   # Random threshold for now
-                        # print(msg)
-                        if msg == None: 
-                            # send no_election? small packet to tell them to continue sending data
-                            self.send_ready_msg(ni)
-                            # if(node.ready_to_send):
-                            #     node.action = Action.SEND_DATA
-                            # if(node.ready_to_send): node.action = Action.SEND_DATA
-                            continue
-                        self.send_election_msg(ni, msg)
+                        # msg = self.elect_new_head(ni, 0)   # Random threshold for now
+                        # # print(msg)
+                        # if msg == None: 
+                        #     # send no_election? small packet to tell them to continue sending data
+                        #     self.send_ready_msg(ni)
+                        #     # if(node.ready_to_send):
+                        #     #     node.action = Action.SEND_DATA
+                        #     # if(node.ready_to_send): node.action = Action.SEND_DATA
+                        #     continue
+                        # self.send_election_msg(ni, msg)
 
         # current time period = 500 ticks? maybe less? idk
         # for ni in self._graph.nodes(): 
         #     print(self._graph.nodes[ni]["node"].id, self._graph.nodes[ni]["node"].state)
         
-     
-        if self._tick % 50 == 0:
+        # every so often have a chance to destory a node
+
+        if self._tick % 250 == 0:
             self.startWorthinessCalc()
         if self._tick % 60 == 0:
             self.destroy_nodes()
@@ -811,7 +813,9 @@ class NetworkModel:
     def elect_new_head(self, ni, Eth):
         node = self._graph.nodes[ni]["node"]
         state = node.state.value
-        o_score = node.overall_score 
+        o_score = node.overall_score
+
+        print(ni, o_score)
 
         if (o_score > Eth): return  # do not update if energy is still high
 
@@ -820,7 +824,7 @@ class NetworkModel:
         # Choose a node within the children that fit the criteria
         candidates = [
             self._graph.nodes[child] for child in children
-            if self._graph.nodes[child]["node"].state.value == state+1 and self._graph.nodes[child]["node"].overall_score> Eth
+            if self._graph.nodes[child]["node"].state.value == state+1 and node.chdList[child].overall_score > Eth
         ]
 
         tmp_chdList = {i: Child(c.state, tdma_slot=c.tdma_slot) for i, c in node.chdList.items()}
@@ -862,7 +866,7 @@ class NetworkModel:
         return UPDATE_NOHEAD # no possible candidates
 
     # Elect new head within orphaned nodes
-    def elect_new_head_orphans(self, ni, msg, Eth):
+    def elect_new_head_orphans(self, ni, msg, Oth):
         node = self._graph.nodes[ni]["node"]
 
         find_state = NodeType.CLUSTER_HEAD
@@ -872,7 +876,7 @@ class NetworkModel:
         # Choose a node within the children that fit the criteria
         candidates = [
             self._graph.nodes[child] for child in msg["chdList"]
-            if self._graph.nodes[child]["node"].state.value == find_state.value+1 and self._graph.nodes[child]["node"].overall_score > Eth
+            if self._graph.nodes[child]["node"].state.value == find_state.value+1 and msg["chdList"][child].overall_score > Oth
         ]
 
         if candidates:
