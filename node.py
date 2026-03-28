@@ -118,7 +118,7 @@ class Node:
         for node in nodeList:
             node.receive(self, msg)
 
-    def select_parent(self, baseStationNode: Node):
+    def select_parent(self, baseStationNode):
         if self.state == NodeType.BASE_STATION:
             return
         elif self.state == NodeType.CLUSTER_HEAD:
@@ -161,7 +161,7 @@ class Node:
         }
         self.send(msg, self.parent.node, self.parent.distance)
 
-    def send(self, message: dict, recipient: Node, distance: float):
+    def send(self, message: dict, recipient, distance: float):
         self.consume_energy(sys.getsizeof(message), distance)
         recipient.receive(self, message)
     
@@ -185,7 +185,7 @@ class Node:
             for chd in self.chdList:
                 self.chdList[chd].node.receive(self, message)
 
-    def receive(self, sender: Node, message: dict):
+    def receive(self, sender, message: dict):
         # helper function
         def float_node(tuples_list, nodeId):
             index = find_index_by_id(tuples_list, nodeId)

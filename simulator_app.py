@@ -20,6 +20,7 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import networkx as nx
+import time
 
 from network_model import NetworkModel, LayoutResult
 from node import STATE_STYLE
@@ -78,6 +79,11 @@ class WirelessSimulator(tk.Tk):
         # ── Page container ───────────────────
         self.container = tk.Frame(self, bg=BG)
         self.container.pack(fill="both", expand=True)
+
+        # Metrics
+        self.network_time_ms = 0
+        self.elapsed_time = 0
+        self.curr_start = 0
 
         self.show_page("input")
 
@@ -475,6 +481,7 @@ class WirelessSimulator(tk.Tk):
             self._btn_start.configure(state="disabled")
             self._btn_pause.configure(state="normal")
             self._btn_stop.configure(state="normal")
+            self.curr_start = time.perf_counter()
             self._tick_loop()
 
     def _on_pause(self) -> None:
@@ -482,6 +489,7 @@ class WirelessSimulator(tk.Tk):
         self._stop_animation()
         self._btn_start.configure(state="normal", text="▶  Resume")
         self._btn_pause.configure(state="disabled")
+        self.elapsed_time += time.perf_counter() - self.curr_start
 
     def _on_stop(self) -> None:
         self._running = False
@@ -514,6 +522,11 @@ class WirelessSimulator(tk.Tk):
             f"Active: {snapshot.active_count}  |  "
             f"Delivered: {snapshot.delivered_count}"
         )
+
+        if(snapshot.dead and self.network_time_ms == 0):
+            print()
+            print("Network is dead... close program to see stats")
+            self.network_time_ms = self.elapsed_time + (time.perf_counter() - self.curr_start)
 
         # Append log events
         for line in snapshot.events:
@@ -600,8 +613,21 @@ class WirelessSimulator(tk.Tk):
             self._log_text.see("end")
             self._log_text.configure(state="disabled")
 
+    def display_metric(self):
+        print()
+        print("STATISTICS OF THE NETWORK:")
+        avg_throughput = self.model.avg_throughput()
+        print(f"Final average throughput: {avg_throughput} packets/250 ticks")
+        if(self.network_time_ms == 0):
+            self.elapsed_time += time.perf_counter() - self.curr_start
+            print(f"Elapsed time (Network still running) {self.elapsed_time} seconds")
+        else:
+            print(f"Network lifetime: {self.network_time_ms:.6f} seconds")
 
 # ──────────────────────────────────────────────
 if __name__ == "__main__":
     app = WirelessSimulator()
     app.mainloop()
+
+    # Print out metrics
+    app.display_metric()
