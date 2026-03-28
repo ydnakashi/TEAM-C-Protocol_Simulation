@@ -113,6 +113,7 @@ class SimulationSnapshot:
     dropped_count: int
     active_count: int
     events: list[str]
+    dead: bool
 
 
 # ──────────────────────────────────────────────
@@ -139,11 +140,14 @@ class NetworkModel:
         self._nodes: list[Node] = []
         self._active: list[Node] = []
         self._tdma_slot: int = 0
-        self._phase: Phase = Phase.INIT_ROLES  # Change this 
+        self._phase: Phase = Phase.INIT_ROLES
         self._loss_interval: int = 5   # change this later
         self._destroyed_prob: dict = {}
         self._destroyed: list[int] = []
         self._recieved_poweracks: int = 0
+        self._received_packets_at_BS: int = 0
+        self._throughputs = []
+        self._delivered_interval = 1
 
     # ── Properties ───────────────────────────
     @property
@@ -396,12 +400,12 @@ class NetworkModel:
                 # child calculates its parents worthiness
                 parentWorthiness =  (0.5 * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + 0.5 * currNode.powerRatio
                 currChild.parent.overall_score = parentWorthiness
-                currChild.worthiness = childWorthiness
+                currChild.overall_score = childWorthiness
                 if currChild.parent.powerRatio == 0: 
                     # parent never broadcasted back
                     remove.append(currChild.parent.node.id)
                     self._destroyed.append(currChild.parent.node.id)
-                    currChild.parent = Parent()
+                    # currChild.parent = Parent()
                     currChild.state = Action.ORPHAN_ELECTION
                 else:
                     currChild.parent.L = 0
@@ -525,6 +529,7 @@ class NetworkModel:
                         pkt.progress = 0.0
                         pkt.status = PacketStatus.DELIVERED
                         self._delivered += 1
+                        self._delivered_interval += 1
                         self._events.append(
                             f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} "
                             f"DELIVERED → Node {pkt.destination}"
@@ -537,7 +542,9 @@ class NetworkModel:
                         # node.chdList[pkt.source].received = True
                         # node.action = Action.SEND_DATA_ACK  # send ACK back
                         node.pkt = pkt
-                        # node.waiting-=1 
+
+                        # for throughput calculation
+                        if(pkt.destination == self._base_station): self._received_packets_at_BS += 1
 
                     elif(pkt.content["type"] == "MEMBERACK"):  # Update node's tdma slot received
                         # node.tdmaSlot = pkt.content["schd"][pkt.destination]
@@ -665,6 +672,7 @@ class NetworkModel:
         """
         self._tick += 1
         self._events = []
+        dead = False
         # nodes = self.get_source_nodes()
         # delivered = [p for p in self._packets if p.is_delivered]
 
@@ -785,8 +793,13 @@ class NetworkModel:
 
         if self._tick % 250 == 0:
             self.startWorthinessCalc()
+            self.throughput()   # calculate throughput per 250 ticks
         # if self._tick % 60 == 0:
             self.destroy_nodes()
+
+        if self._tick % 50 == 0:
+            if(self.network_dead()): dead = True
+            self._delivered_interval = 0   # reset interval to determine when network dies
 
         # self.destroy_nodes()
         self.move_packets()
@@ -800,6 +813,7 @@ class NetworkModel:
             dropped_count=self._dropped,
             active_count=len(self._active),
             events=list(self._events),
+            dead=dead
         )
     
     def dist(self, a, b):
@@ -1029,7 +1043,7 @@ class NetworkModel:
                 
                 closest_CH = (neighbor, dist)
         
-        if(closest_CH == None): return None
+        if(closest_CH == None): return self._base_station
         
         return closest_CH[0]
 
@@ -1084,22 +1098,26 @@ class NetworkModel:
             self._graph.nodes[ni]['node'].power = battery[ni]
 
     
+    # Statistics Collection Functions
 
-    # ── Utility ──────────────────────────────
-    # def summary(self) -> str:
-    #     s = self.get_stats()
-    #     conn = "connected" if s.is_connected else f"{s.num_components} components"
-    #     return f"Nodes: {s.num_nodes}  |  Edges: {s.num_edges}  |  {conn}"
+    def network_dead(self):
+        # Amount of time it takes for the network to not work anymore
+        return self._delivered_interval == 0
 
-    # def nx_functions_used(self) -> list[str]:
-    #     return [
-    #         "nx.Graph()", "G.add_node()", "G.add_edge()",
-    #         "G.remove_node()", "G.remove_edge()", "G.clear()",
-    #         "G.nodes()", "G.edges(data=True)",
-    #         "G.number_of_nodes()", "G.number_of_edges()",
-    #         "G.degree()", "G.neighbors()",
-    #         "nx.spring_layout()", "nx.get_edge_attributes()",
-    #         "nx.is_connected()", "nx.connected_components()",
-    #         "nx.shortest_path()", "nx.shortest_path_length()",
-    #         "nx.has_path()",
-    #     ]
+    def end_to_end_delay(self):
+        # per-packet basis
+        # time from packet transmission to BS
+        # dist / speed
+        # dist is from neighborList or broadcastList
+        # or do I just time how long it takes each time? idk how i'd do that tho
+        # what is the speed?
+        pass
+
+    def throughput(self, interval=250):
+        self._throughputs.append(self._received_packets_at_BS)
+        self._received_packets_at_BS = 0
+
+    def avg_throughput(self):
+        # packets received at BS / time period (in ticks)
+        if(len(self._throughputs) == 0): return 0
+        return sum(self._throughputs) / (len(self._throughputs))
