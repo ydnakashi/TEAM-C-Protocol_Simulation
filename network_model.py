@@ -38,7 +38,6 @@ import copy
 import networkx as nx
 # from network_node import *
 from node import Child, Node, NodeType, Parent, Action
-from nodemaxxing import *
 
 # ──────────────────────────────────────────────
 #  Data classes
@@ -341,6 +340,7 @@ class NetworkModel:
                 "type": "MEMBERACK"   
             }
             pkt = self.spawn_packet(msg, parent, child)
+            # parent.send_memberack_message(msg, child)
 
     def update_TDMA_slot(self, node: int, slot: int, total_slots: int):
         """Record TDMA schedule information when received by parent."""
@@ -374,7 +374,6 @@ class NetworkModel:
                         "type": "POWERREQ",
                         "parentPower": currNode.powerPercent
                     }, 
-                    nodes=self._graph.nodes
                 )
             currNode = self._graph.nodes[id]["node"]
             remove = []
@@ -496,6 +495,9 @@ class NetworkModel:
                 f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} {pkt.content['type']} "
                 f"spawned at Node {pkt.source}   route: {route_str}"
             )
+            sourceNode = self._graph.nodes[source]['node']
+            destNode = self._graph.nodes[dest]['node']
+            sourceNode.send(content, destNode, self.dist(sourceNode, destNode))
         return pkt
 
     def destroy_packets(self, pck):

@@ -40,6 +40,12 @@ class Action(Enum):
     ORPHAN_ELECTION = "ORPHAN_ELECTION"
     AWAIT_REQS = "AWAIT_REQS"
 
+def find_index_by_id(tuples_list, first_elem):
+            for i, t in enumerate(tuples_list):
+                if t[0].id == first_elem:
+                    return i
+            return -1
+
 class Node:
     def __init__(self, id, powerPercent=100, coords=None, bsCoords = [0, 0], Rc=2): # power in nanojoules
         # What the node knows in reality
@@ -83,7 +89,7 @@ class Node:
             "type": "SEND_DATA",
             "data": 100
         }
-        self.broadcast(message, self.parent.node, self.parent.distance)
+        self.send(message, self.parent.node, self.parent.distance)
 
     def select_state(self):
         if self.state == NodeType.BASE_STATION:
@@ -109,7 +115,7 @@ class Node:
             self.consume_energy(sys.getsizeof(msg), self.Rc)
         else:
             return
-        # don't use broadcast function here since it issues one state message to a hide area
+        # don't use send function here since it issues one state message to a hide area
         for node in nodeList:
             node.receive(self, msg)
 
@@ -154,48 +160,43 @@ class Node:
             "state": self.state,
             "coords": self.coords
         }
-        self.broadcast(msg, self.parent.node, self.parent.distance)
+        self.send(msg, self.parent.node, self.parent.distance)
 
-    def broadcast(self, message: dict, recipient: Node, distance: float):
+    def send(self, message: dict, recipient: Node, distance: float):
         recipient.receive(self, message)
         self.consume_energy(sys.getsizeof(message), distance)
     
-    # def broadcast(self, message):
-        # # get all nodes within the Rc distance
-        # if(message['type'] == "STATE"):
-        #     for neighbour, dist in self.neighbourList:
-        #         neighbour.receive(self, message)
-        #         self.consume_energy(sys.getsizeof(message), dist)
-        #     if self.state == NodeType.CLUSTER_HEAD:
-        #         for neighbour, dist in self.broadcastList:
-        #             neighbour.receive(self, message)
-        #             self.consume_energy(sys.getsizeof(message), dist)
-        # if(message['type'] == "MEMBERJOIN"):
-        #     self.parent.node.receive(self, message)
-
-        # if(message['type'] == "CHROUTE"):
-        #     for neighbour, dist in self.neighbourList:
-        #         neighbour.receive(self, message, -1)
-        #         self.consume_energy(sys.getsizeof(message), dist)
+    def broadcast(self, message):
+        # get all nodes within the Rc distance
+        if self.state == NodeType.CLUSTER_HEAD:
+            self.consume_energy(sys.getsizeof(message), 3/2*self.Rc)
+        else:
+            self.consume_energy(sys.getsizeof(message), self.Rc)
         
-        # if (message['type'] == "POWERREQ"):
-        #     if self.state == NodeType.DEAD:
-        #         return
-        #     print(self.chdList)
-        #     for chd in self.chdList:
-        #         nodes[chd]['node'].receive(self, message)
-        #         # self.consume_energy(sys.getsizeof(message), dist)
+        if(message['type'] == "STATE"):
+            for neighbour, dist in self.neighbourList:
+                neighbour.receive(self, message)
+            if self.state == NodeType.CLUSTER_HEAD:
+                for neighbour, dist in self.broadcastList:
+                    neighbour.receive(self, message)
+        if(message['type'] == "MEMBERJOIN"):
+            self.parent.node.receive(self, message)
+
+        if(message['type'] == "CHROUTE"):
+            for neighbour, dist in self.neighbourList:
+                neighbour.receive(self, message, -1)
+        
+        if (message['type'] == "POWERREQ"):
+            if self.state == NodeType.DEAD:
+                return
+            print(self.chdList)
+            for chd in self.chdList:
+                self.chdList[chd].node.receive(self, message)
 
     def receive(self, sender: Node, message: dict):
         # helper function
-        def find_index_by_senderId(tuples_list, first_elem):
-            for i, t in enumerate(tuples_list):
-                if t[0].id == first_elem:
-                    return i
-            return -1
-
         def float_node(tuples_list, nodeId):
-            index = find_index_by_senderId(tuples_list, nodeId)
+            index = find_index_by_id(tuples_list, nodeId)
             if index == -1:
                 raise ValueError("Node floating failed")
             tup = tuples_list.pop(index)
@@ -205,7 +206,7 @@ class Node:
         if message["type"] == "STATE":
             if self.state == NodeType.ASLEEP: 
                 self.state = NodeType.AWAKE
-                
+
             senderId = message["sender"]
             if senderId in [t[0].id for t in self.neighbourList]:
                 # float latest STATE message sender to top to make sure former IR nodes are selected for parent CH
