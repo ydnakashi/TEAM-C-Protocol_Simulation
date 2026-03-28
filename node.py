@@ -38,7 +38,7 @@ class Child:
     overall_score: float = 1
     L: int = 0
     N: int = 0
-    powerRatio: float = 0.0
+    powerPercent: float = 0.0
 
 class Action(Enum):
     SEND_DATA = auto()
@@ -59,11 +59,11 @@ class Node:
     #     self.overall_score = 100
     #     # self.timeSlot = 0
     #     self.currentBSDist = 1000000000
-    def __init__(self, id, power=0.5e9, coords=None, bsCoords=None, Rc=2): # power in nanojoules
+    def __init__(self, id, powerPercent=100, coords=None, bsCoords=None, Rc=2): # power in nanojoules
         self.id: int = id
         self.state: NodeType = None
-        self.power: float = power
-        self.powerRatio: float = power/(0.5e9) 
+        self.power: float = (0.5e9)*(powerPercent/100)
+        self.powerPercent: float = powerPercent
         self.coords: tuple[int, int] = tuple(coords) if coords else (0, 0)
         self.worthiness: float = 1
         self.overall_score: float = 1
@@ -180,17 +180,17 @@ class Node:
             if self.state == NodeType.DEAD:
                 return
 
-            self.parent.powerRatio = message['parentPower']
+            self.parent.powerPercent = message['parentPower']
 
             sender.receive(self, message={
                 "type": "POWERRETURN",
-                "power": self.powerRatio
+                "power": self.powerPercent
             })
 
         elif message['type'] == "POWERRETURN":
             if self.state == NodeType.DEAD:
                 return
-            self.chdList[sender.id].powerRatio = message["power"]
+            self.chdList[sender.id].powerPercent = message["power"]
                 
             
     def neighbourCount(self):
@@ -228,12 +228,12 @@ class Node:
         else:
             consumption = EnergyConsumption.ENERGY_PER_BIT.value * k + EnergyConsumption.EPSILON_FS.value * k * d**2
         self.power -= consumption
-        self.powerRatio = self.power/(0.5e9)
+        self.powerPercent = self.power/(0.5e9) *100
         if self.power < 0:
             self.power = 0
-            self.powerRatio = 0
-        # if isinstance(self.power, complex):
-        #     self.power = self.power.real
+            self.powerPercent = 0
+        print(f"{self.id}: {self.powerPercent}")
+
 
 
 @dataclass
@@ -242,4 +242,4 @@ class Parent:
     L: int = 0
     N: int = 0
     overall_score: float = 1
-    powerRatio: float = 0.0
+    powerPercent: float = 0.0

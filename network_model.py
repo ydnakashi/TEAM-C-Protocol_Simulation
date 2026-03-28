@@ -174,8 +174,8 @@ class NetworkModel:
         for i in range(n):
             node_id = i + 1  
       
-        # for each node, call a randomized battery function?
-            self._graph.add_node(i+1, label=f"Node{i+1}", node=(Node(node_id, 100, [coords[i][0], coords[i][1]]))
+            randomBattery = randomizeBattery(2)
+            self._graph.add_node(i+1, label=f"Node{i+1}", node=(Node(node_id, randomBattery,[coords[i][0], coords[i][1]]))
             )
         # self._graph.add_node(Node())
         for i in range(n):
@@ -362,19 +362,17 @@ class NetworkModel:
                 msg = {
                     "ready": ready,
                     "type": "POWERREQ",
-                    "parentPower": self._graph.nodes[id]["node"].powerRatio
+                    "parentPower": self._graph.nodes[id]["node"].powerPercent
                 }
                 pkt = self.spawn_packet(msg, id, child)
     
     def startWorthinessCalc(self):
-        alpha = 0.0
-        beta = 1.0
         parents = self.get_parent_nodes() 
         for id in parents:
             currNode = self._graph.nodes[id]["node"]
             currNode.broadcast(message={
                         "type": "POWERREQ",
-                        "parentPower": currNode.powerRatio
+                        "parentPower": currNode.powerPercent
                     }, 
                     nodes=self._graph.nodes
                 )
@@ -386,19 +384,19 @@ class NetworkModel:
                     continue
                 # the actual child node
                 currChild = self._graph.nodes[childId]["node"]
-                if childObj.powerRatio == 0:
+                if childObj.powerPercent == 0:
                     remove.append(childId)
                     self._destroyed.append(childId)
                     currNode.totalSlots -=1
                     # never got a power message back, node is dead
-                childWorthiness = (0.5*self.calculate_worthiness_score(childObj.L, childObj.N)) + 0.5* childObj.powerRatio
+                childWorthiness = (0.5*self.calculate_worthiness_score(childObj.L, childObj.N)) + 0.5* childObj.powerPercent/100
                 childObj.overall_score=childWorthiness
                
                 # child calculates its parents worthiness
-                parentWorthiness =  (0.5 * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + 0.5 * currNode.powerRatio
+                parentWorthiness =  (0.5 * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + 0.5 * currNode.powerPercent/100
                 currChild.parent.overall_score = parentWorthiness
                 currChild.worthiness = childWorthiness
-                if currChild.parent.powerRatio == 0: 
+                if currChild.parent.powerPercent == 0: 
                     # parent never broadcasted back
                     remove.append(currChild.parent.node.id)
                     self._destroyed.append(currChild.parent.node.id)
@@ -407,12 +405,12 @@ class NetworkModel:
                 else:
                     currChild.parent.L = 0
                     currChild.parent.N = 0
-                    currChild.parent.powerRatio = 0
+                    # currChild.parent.powerPercent = 0
 
                 print("Worthiness ", childWorthiness, parentWorthiness)
                 childObj.L = 0
                 childObj.N = 0
-                childObj.powerRatio = 0
+                # childObj.powerPercent = 0
             
             for n in remove:
                 currNode.chdList.pop(n, None)
@@ -679,22 +677,12 @@ class NetworkModel:
                 stateSelection(self._graph)
                 clusterCreation(self._graph, self.base_station)
 
-                # for n in self._graph.nodes:
-                #     node = self._graph.nodes[n]["node"]
-                #     print(f"""
-                #         {node.id} - {node.state}:
-                #             Parent: {node.parent.node.id if node.parent.node != None else None}
-                #             Children: {node.chdList.keys()}
-                #     """
-                #     )
-
                 self.init_TDMA()
                 self.redo_edges()
 
                 self.init_destruction_probabilities()
                 self.init_actions()
                 # use the same number to get the same seeded random battery life
-                self.randomizeBattery(1)
                 # self.target_destroy(10)
                 self._phase = Phase.ROUTING
             else:
@@ -1079,13 +1067,10 @@ class NetworkModel:
 
 
     # this is seeded randomness
-    def randomizeBattery(self, seed):
-        random.seed(seed)
-        # cap the battery at 45%
-        battery = [random.randint(45, 100) for _ in range(20)]
-
-        for ni in self._graph.nodes:
-            self._graph.nodes[ni]['node'].power = battery[ni]
+def randomizeBattery(seed):
+    random.seed(seed)
+    # cap the battery at 45%
+    return float(random.randint(45, 100))
 
     
 
