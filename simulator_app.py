@@ -404,8 +404,9 @@ class WirelessSimulator(tk.Tk):
         tk.Label(cfg, text="Base station:", font=FONT_BOLD,
                  bg=BG, fg=FG).pack(side="left")
         nodes = self.model.get_nodes()
-        self._base_var = tk.StringVar(value=str(nodes[-1]))  # default: last node
-        tk.OptionMenu(cfg, self._base_var, *[str(n) for n in nodes]).pack(side="left", padx=6)
+        self._base_var = tk.StringVar(value=str(nodes[0]))  # default: last node
+        self._base_menu = tk.OptionMenu(cfg, self._base_var, *[str(n) for n in nodes])
+        self._base_menu.pack(side="left", padx=6)
 
         # ── Control buttons ──────────────────
         btn_frame = tk.Frame(cfg, bg=BG)
@@ -476,6 +477,7 @@ class WirelessSimulator(tk.Tk):
         if not self._running:
             # Fresh start or resume
             self._running = True
+            self._base_menu.configure(state="disabled")
             self._btn_start.configure(state="disabled")
             self._btn_pause.configure(state="normal")
             self._btn_stop.configure(state="normal")

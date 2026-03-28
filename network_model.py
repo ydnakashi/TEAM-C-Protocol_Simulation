@@ -38,7 +38,6 @@ import copy
 import networkx as nx
 # from network_node import *
 from node import Child, Node, NodeType, Parent, Action
-from nodemaxxing import *
 
 # ──────────────────────────────────────────────
 #  Data classes
@@ -178,8 +177,8 @@ class NetworkModel:
         for i in range(n):
             node_id = i + 1  
       
-        # for each node, call a randomized battery function?
-            self._graph.add_node(i+1, label=f"Node{i+1}", node=(Node(node_id, 100, [coords[i][0], coords[i][1]]))
+            randomBattery = randomizeBattery(2)
+            self._graph.add_node(i+1, label=f"Node{i+1}", node=(Node(node_id, randomBattery,[coords[i][0], coords[i][1]]))
             )
         # self._graph.add_node(Node())
         for i in range(n):
@@ -345,6 +344,7 @@ class NetworkModel:
                 "type": "MEMBERACK"   
             }
             pkt = self.spawn_packet(msg, parent, child)
+            # parent.send_memberack_message(msg, child)
 
     def update_TDMA_slot(self, node: int, slot: int, total_slots: int):
         """Record TDMA schedule information when received by parent."""
@@ -367,7 +367,7 @@ class NetworkModel:
                 msg = {
                     "ready": ready,
                     "type": "POWERREQ",
-                    "parentPower": self._graph.nodes[id]["node"].powerRatio
+                    "parentPower": self._graph.nodes[id]["node"].powerPercent
                 }
                 pkt = self.spawn_packet(msg, id, child)
     
@@ -377,9 +377,8 @@ class NetworkModel:
             currNode = self._graph.nodes[id]["node"]
             currNode.broadcast(message={
                         "type": "POWERREQ",
-                        "parentPower": currNode.powerRatio
+                        "parentPower": currNode.powerPercent
                     }, 
-                    nodes=self._graph.nodes
                 )
             currNode = self._graph.nodes[id]["node"]
             remove = []
@@ -389,19 +388,19 @@ class NetworkModel:
                     continue
                 # the actual child node
                 currChild = self._graph.nodes[childId]["node"]
-                if childObj.powerRatio == 0:
+                if childObj.powerPercent == 0:
                     remove.append(childId)
                     self._destroyed.append(childId)
                     currNode.totalSlots -=1
                     # never got a power message back, node is dead
-                childWorthiness = (0.5*self.calculate_worthiness_score(childObj.L, childObj.N)) + 0.5* childObj.powerRatio
+                childWorthiness = (0.5*self.calculate_worthiness_score(childObj.L, childObj.N)) + 0.5* childObj.powerPercent/100
                 childObj.overall_score=childWorthiness
                
                 # child calculates its parents worthiness
-                parentWorthiness =  (0.5 * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + 0.5 * currNode.powerRatio
+                parentWorthiness =  (0.5 * self.calculate_worthiness_score(currChild.parent.L, currChild.parent.N)) + 0.5 * currNode.powerPercent/100
                 currChild.parent.overall_score = parentWorthiness
                 currChild.overall_score = childWorthiness
-                if currChild.parent.powerRatio == 0: 
+                if currChild.parent.powerPercent == 0: 
                     # parent never broadcasted back
                     remove.append(currChild.parent.node.id)
                     self._destroyed.append(currChild.parent.node.id)
@@ -501,6 +500,9 @@ class NetworkModel:
                 f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} {pkt.content['type']} "
                 f"spawned at Node {pkt.source}   route: {route_str}"
             )
+            sourceNode = self._graph.nodes[source]['node']
+            destNode = self._graph.nodes[dest]['node']
+            sourceNode.send(content, destNode, self.dist(sourceNode, destNode))
         return pkt
 
     def destroy_packets(self, pck):
@@ -679,18 +681,9 @@ class NetworkModel:
         if (self._tick % self._spawn_interval == 0):
 
             if(self._phase == Phase.INIT_ROLES):
-                twaitCalculation(self._graph)
-                stateSelection(self._graph)
-                clusterCreation(self._graph, self.base_station)
-
-                # for n in self._graph.nodes:
-                #     node = self._graph.nodes[n]["node"]
-                #     print(f"""
-                #         {node.id} - {node.state}:
-                #             Parent: {node.parent.node.id if node.parent.node != None else None}
-                #             Children: {node.chdList.keys()}
-                #     """
-                #     )
+                self.twaitCalculation()
+                self.stateSelection()
+                self.clusterCreation()
 
                 self.init_TDMA()
                 self.redo_edges()
@@ -698,7 +691,6 @@ class NetworkModel:
                 self.init_destruction_probabilities()
                 self.init_actions()
                 # use the same number to get the same seeded random battery life
-                self.randomizeBattery(1)
                 # self.target_destroy(10)
                 self._phase = Phase.ROUTING
             else:
@@ -820,6 +812,70 @@ class NetworkModel:
         x1, y1 = a.coords
         x2, y2 = b.coords
         return ((x1-x2)**2 + (y1-y2)**2)** 0.5
+    
+    def twaitCalculation(self, graphX=10, graphY=10, Rc=2, alpha=0.5):
+        # the total amount of nodes in the graph
+        N = self._graph.number_of_nodes()
+
+        for ni in self._graph.nodes():      
+            node = self._graph.nodes[ni]["node"]
+        
+            for oi in self._graph.nodes():
+                other = self._graph.nodes[oi]["node"]
+                # check that the node is not itself
+                if node == other :
+                    continue
+               
+                dist = self.dist(node, other)
+
+                if dist <= Rc:
+                    node.neighbourList.append((other, dist))
+                # only nodes that are within the multipled distance but outside of Rc are added
+                elif dist <= (3/2) * Rc:
+                    node.broadcastList.append((other, dist))
+                elif dist <= 3 * Rc:
+                    node.relayList.append((other, dist))
+
+        # nodes to cluster ratio
+        NC = graphX * graphY / (Rc) ** 2
+        NNavg = N / NC
+
+        # twait calculations
+        for ni in self._graph.nodes():
+            node = self._graph.nodes[ni]["node"]
+            NNi = len(node.neighbourList)
+
+            if NNi == 0:
+                node.twait = 1000
+                continue
+
+            # icd compute
+            total_dist = sum(dist for (_, dist) in node.neighbourList)
+            ICDi = total_dist / NNi
+            # print("ICDI: " ,ICDi)
+
+            if NNi > NNavg:
+                twait = alpha * (ICDi / Rc) + (1 - alpha) * \
+                    (1 - (NNi / N)) * (1 - ((NNi - NNavg) / N))
+            else:
+                twait = alpha * (ICDi / Rc) + (1 - alpha) * \
+                    (1 - (NNi / N))
+            node.twait = twait
+
+    def stateSelection(self):    
+        sortedNodes = sorted(self._graph.nodes(), key=lambda n: self._graph.nodes[n]["node"].twait)
+        # State setting based on twait
+        for n in sortedNodes:
+            node = self._graph.nodes[n]["node"]
+            if node.state == NodeType.ASLEEP: node.state = NodeType.AWAKE
+            node.select_state()
+
+    def clusterCreation(self):
+        sortedNodes = sorted(self._graph.nodes(), key=lambda n: self._graph.nodes[n]["node"].twait)
+        bsNode = self._graph.nodes[self._base_station]['node']
+        for n in sortedNodes:
+            node = self._graph.nodes[n]['node']
+            node.select_parent(bsNode)
 
     # Current CH or S_CH enters the head update phase
     def elect_new_head(self, ni, Eth):
@@ -1087,16 +1143,6 @@ class NetworkModel:
             self._packets = [p for p in self._packets
                              if p.packet_id not in remove_ids]
 
-
-    # this is seeded randomness
-    def randomizeBattery(self, seed):
-        random.seed(seed)
-        # cap the battery at 45%
-        battery = [random.randint(45, 100) for _ in range(20)]
-
-        for ni in self._graph.nodes:
-            self._graph.nodes[ni]['node'].power = battery[ni]
-
     
     # Statistics Collection Functions
 
@@ -1121,3 +1167,10 @@ class NetworkModel:
         # packets received at BS / time period (in ticks)
         if(len(self._throughputs) == 0): return 0
         return sum(self._throughputs) / (len(self._throughputs))
+    
+
+    # this is seeded randomness
+def randomizeBattery(seed):
+    random.seed(seed)
+    # cap the battery at 45%
+    return float(random.randint(45, 100))
