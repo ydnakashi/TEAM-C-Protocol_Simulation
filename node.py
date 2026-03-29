@@ -235,7 +235,6 @@ class Node:
         if message['type'] == "POWERREQ":
             if self.state == NodeType.DEAD:
                 return
-
             self.parent.powerPercent = message['parentPower']
 
             sender.receive(self, message={
@@ -279,12 +278,9 @@ class Node:
         # worthiness was 0, child changes parent to dead
         self.parent.L = 0
         self.parent.N = 0
-        # print("PARENT WORTHINESS FROM ", self.id, ":", w)
-        if w <= 0: 
-            # i think this branch should be unreachable
-            print("TEST")
-        else:
-            self.parent.overall_score = w + (0.5*self.parent.powerPercent)
+     
+        self.parent.overall_score = 0.5*w + (0.5* (self.parent.powerPercent / 100))
+        print("PARENT WORTHINESS FROM ", self.id, ":", 0.5*w, self.parent.powerPercent / 100, self.parent.overall_score)
 
     # icd used to calcualte twait time
     # euclidan distance of all the nodes in its neighbour array
