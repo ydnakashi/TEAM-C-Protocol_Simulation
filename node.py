@@ -125,14 +125,17 @@ class Node:
             self.parent.node = baseStationNode
 
             # Get list of nodes in relay and broadcast list that are clusterheads
-            nodeList = [t[0] for t in self.relayList + self.broadcastList if t[0].state == NodeType.CLUSTER_HEAD]
+            nodeList = [t[0] for t in self.broadcastList + self.relayList if t[0].state == NodeType.CLUSTER_HEAD]
+
+            # if not nodeList:
+            #     nodeList = [t[0] for t in self.relayList if t[0].state == NodeType.CLUSTER_HEAD]
         
             # If node list contains no nodes within range that are cluster heads, make base station the parent and return
             if not nodeList:
                 return
 
             # Get list of nodes to distance to base station
-            distanceList = [(node, math.sqrt((node.coords[0]-0)**2 + (node.coords[1]-0)**2)) for node in nodeList]
+            distanceList = [(node, math.sqrt((node.coords[0]-node.bsCoords[0])**2 + (node.coords[1]-node.bsCoords[0])**2)) for node in nodeList]
             
             # Get their self distance to base station
             BSdist = math.sqrt((self.coords[0]-self.bsCoords[0])**2 + (self.coords[1]-self.bsCoords[1])**2)
@@ -140,13 +143,15 @@ class Node:
             # Get neighbour node closest to base station
             minNode, minDist = min(distanceList, key=lambda t: t[1])
             if minDist < BSdist:
-                self.parent.node = minNode
+                self.parent = Parent(node = minNode)
+                # self.parent.node = minNode
         else:
             nodeList = self.neighbourList
             for neighbour, _ in sorted(nodeList, key=lambda t:t[1]):
                 if (self.state == NodeType.ORDINARY and neighbour.state == NodeType.SUBCLUSTER_HEAD) \
                     or (self.state == NodeType.SUBCLUSTER_HEAD and neighbour.state == NodeType.CLUSTER_HEAD):
-                    self.parent.node = neighbour
+                    self.parent = Parent(node = neighbour)
+                    # self.parent.node = neighbour
                     break
             if self.parent.node == None:
                 raise ValueError(f"Parent selection error for Node {self.id}")
@@ -309,6 +314,9 @@ class Node:
         if self.power < 0:
             self.power = 0
             self.powerPercent = 0
+            self.state = NodeType.DEAD
+            print("DEAD", self.id)
+
         # print(f"{self.id}: {self.powerPercent}")
 
 @dataclass
@@ -338,6 +346,7 @@ class Parent:
     L: int = 0
     N: int = 0
     overall_score: float = 1
+    worthiness_score: float = 1
     powerPercent: float = 0.0
     x: int = 0
     y: int = 0

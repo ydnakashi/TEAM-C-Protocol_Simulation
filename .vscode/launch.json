@@ -6,7 +6,7 @@
         "type": "debugpy",
         "request": "launch",
         "program": "${workspaceFolder}/simulator_app.py",
-        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+        // "python": "${workspaceFolder}/.venv/Scripts/python.exe"
       }
     ]
   }

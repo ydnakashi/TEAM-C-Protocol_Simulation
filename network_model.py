@@ -1,30 +1,5 @@
 """
 network_model.py — Model Layer
-===============================
-Owns the NetworkX graph, packet simulation state, and every
-network-related operation.  Has ZERO knowledge of tkinter,
-matplotlib, or any GUI framework.
-
-NetworkX functions used (★):
-  ★ nx.Graph()                     — create undirected graph
-  ★ G.add_node()                   — add node with attributes
-  ★ G.add_edge()                   — add weighted edge
-  ★ G.remove_node()                — remove a node and its edges
-  ★ G.remove_edge()                — remove a specific edge
-  ★ G.clear()                      — reset the entire graph
-  ★ G.nodes()                      — iterate all nodes
-  ★ G.edges(data=True)             — iterate edges with attributes
-  ★ G.number_of_nodes()            — node count
-  ★ G.number_of_edges()            — edge count
-  ★ G.degree()                     — node connectivity count
-  ★ G.neighbors()                  — adjacent nodes
-  ★ nx.spring_layout()             — Fruchterman-Reingold positioning
-  ★ nx.get_edge_attributes()       — bulk-retrieve edge weights
-  ★ nx.is_connected()              — check full reachability
-  ★ nx.connected_components()      — find isolated sub-networks
-  ★ nx.shortest_path()             — shortest hop path between nodes
-  ★ nx.shortest_path_length()      — shortest hop distance
-  ★ nx.has_path()                  — reachability check between two nodes
 """
 
 from __future__ import annotations
@@ -114,6 +89,9 @@ class SimulationSnapshot:
     events: list[str]
     dead: bool
 
+class Protocol(Enum):
+    MI2RSDiC = auto()
+    TEAM_C = auto()
 
 # ──────────────────────────────────────────────
 #  The Model
@@ -125,9 +103,8 @@ class NetworkModel:
     """
 
     def __init__(self) -> None:
-        self._graph: nx.Graph = nx.Graph()          # ★ nx.Graph()
+        self._graph: nx.Graph = nx.Graph()
 
-        # ── Simulation state ─────────────────
         self._base_station: int = 1
         self._packets: list[Packet] = []
         self._next_packet_id: int = 1
@@ -148,6 +125,13 @@ class NetworkModel:
         self._received_packets_at_BS: int = 0
         self._throughputs = []
         self._delivered_interval = 1
+
+        # self._nodes_to_destroy : list[int] = [9, 11, 15, 3]  #, 9, 11, 6]
+        self._nodes_to_destroy: list[int] = [9, 2]
+
+        # Switch based on protocol to run
+        # self._protocol: Protocol = Protocol.MI2RSDiC
+        self._protocol: Protocol = Protocol.TEAM_C
 
     # ── Properties ───────────────────────────
     @property
@@ -178,7 +162,15 @@ class NetworkModel:
         for i in range(n):
             node_id = i + 1  
       
-            randomBattery = randomizeBattery(node_id)
+            if node_id == 6:
+                randomBattery = 65
+            elif node_id == 7:
+                randomBattery = 98
+            elif node_id == 11:
+                randomBattery = 98
+            else:
+                randomBattery = randomizeBattery(node_id)
+            
             self._graph.add_node(i+1, label=f"Node{i+1}", node=(Node(id=node_id, powerPercent=randomBattery,coords=[coords[i][0], coords[i][1]], Rc=link_range))
             )
         # self._graph.add_node(Node())
@@ -359,7 +351,6 @@ class NetworkModel:
         t = L/N
         r = 1 - (((12*L*(N-L))**0.5) / ((N+1)*N))
         w = 1 - (((t-1)**2 + (c**2) * (r-1)**2)**0.5 / (1+c**2)**0.5)
-        print("WORTHINESS CALC", t, r, w)
         return t
     
     def spawn_battery_req(self, ready=True):
@@ -382,22 +373,33 @@ class NetworkModel:
             # calculate parents score  
             parent_worthiness = self.calculate_worthiness_score(node.parent.L, node.parent.N)
             print("ID, worthyscore, L, N", node.id, parent_worthiness, node.parent.L, node.parent.N)
-            parent_overall_score = 0.5 * parent_worthiness + (0.5 * (node.parent.powerPercent/100))
+            
+            w_weight = 0.5
+            p_weight = 0.5
+            if self._protocol == Protocol.MI2RSDiC:
+                w_weight = 0
+                p_weight = 1
+
+            # Calculate worthiness score
+            parent_overall_score = w_weight * parent_worthiness + (p_weight * (node.parent.powerPercent/100))
+            
             node.parent.overall_score = parent_overall_score
             node.parent.L = 0
             node.parent.N = 0
+            node.parent.worthiness_score = parent_worthiness
             print("current id, parent score", node.id, node.parent.overall_score)
             
             # calculate childrens score
             for chdId, childObj in node.chdList.items():
                 child_worthiness = self.calculate_worthiness_score(childObj.L, childObj.N)
-                if child_worthiness <= 0:
-                    self._to_remove.add(chdId)
+                # if child_worthiness <= 0:
+                #     print("destroyed: ", chdId)
+                #     self._to_remove.add(chdId)
                 child_overall_score = 0.5 * child_worthiness + (0.5 * (childObj.powerPercent/100))
                 childObj.overall_score = child_overall_score
                 childObj.N = 0
                 childObj.L = 0
-                print("childId, child score: ", chdId, child_overall_score)
+                # print("childId, child score: ", chdId, child_overall_score)
 
 
             
@@ -442,27 +444,41 @@ class NetworkModel:
         # for ni, prob in self._destroyed_prob.items()::
         for ni, prob in self._destroyed_prob.items():
             if (random.randrange(0, 100)) < prob and (ni not in self._destroyed):
+                node = self._graph.nodes[ni]["node"]
                 # self._destroyed.add(ni)
-                self._graph.nodes[ni]["node"].timer = -1
-                self._graph.nodes[ni]["node"].powerPercent = 0
+                node.timer = -1
+                node.powerPercent = 0
                 new_destroyed.append(ni)
                 # self._destroyed.add(self._graph.nodes[ni]["node"].id)
-                self._graph.nodes[ni]["node"].state = NodeType.DEAD
+                node.state = NodeType.DEAD
+                node.parent.node.chdList.pop(node.id, None)
     
+                self._destroyed.add(node)
                 # self._graph.nodes[ni]["node"] = Node(ni)  # wipe the data
                 # print("new destorted: ", self._destroyed)
                 self._events.append(f"Destroyed nodes: {new_destroyed}")
+                self.redo_edges()
                 return
         print("destoryed: ", self._destroyed)
 
-    def target_destroy(self, id):
-        # self._destroyed.append(id)
-        self._graph.nodes[id]["node"].timer = -1
-        self._graph.nodes[id]['node'].powerPercent = 0
+    def target_destroy(self):
+        if len(self._nodes_to_destroy) <= 0:
+            return
+        id = self._nodes_to_destroy[0]
+        self._destroyed.add(id)
+        self._nodes_to_destroy.pop(0)
+
+        node = self._graph.nodes[id]["node"]
+        node.timer = -1
+        node.powerPercent = 0
         # self._destroyed.append(self._graph.nodes[id]["node"].id)
-        self._graph.nodes[id]['node'].state = NodeType.DEAD
+        node.state = NodeType.DEAD
+
+        node.parent.node.chdList.pop(node.id, None)
         # self._graph.nodes[ni]["node"] = Node(ni)  # wipe the data
         print("destroyed: ", self._destroyed)
+
+        self.redo_edges()
 
 
     # def reset_routing(self):
@@ -556,6 +572,7 @@ class NetworkModel:
                     if(pkt.content["type"] == "DATA_MSG"):
                         # node.chdList[pkt.source].received = True
                         # node.action = Action.SEND_DATA_ACK  # send ACK back
+                        if(pkt.source not in node.chdList): continue
                         node.chdList[pkt.source].powerPercent = pkt.content["power"]
                         node.pkt = pkt
 
@@ -582,7 +599,10 @@ class NetworkModel:
                             pkt.status = PacketStatus.DROPPED
                             continue
 
-                        if(not node.await_parent):  node.action = Action.ORPHAN_ELECTION    
+                        if(self._protocol == Protocol.MI2RSDiC):
+                            node.action = Action.ELECTION
+                        elif(not node.await_parent and node.action != Action.AWAIT_REQS):  
+                            node.action = Action.ORPHAN_ELECTION    
 
                         node.parent.L += 1
                         node.parent.powerPercent = pkt.content["power"]
@@ -591,6 +611,7 @@ class NetworkModel:
                         node.ready_to_send = True
 
                     elif(pkt.content["type"] == "UPDATE_HEAD"):
+                        print("UPDATE HEAD", pkt.content)
                         self.update_new_head(pkt.destination, pkt.content)
                         self.redo_edges()
                     
@@ -715,7 +736,6 @@ class NetworkModel:
                 self.init_destruction_probabilities()
                 self.init_actions()
                 # use the same number to get the same seeded random battery life
-                self.randomizeBattery(1)
                 # self.target_destroy(11)
                 # print(self._destroyed)
                 # print(self._to_remove)
@@ -727,15 +747,17 @@ class NetworkModel:
                 for ni in self._graph.nodes():
                     node = self._graph.nodes[ni]["node"]
                     # if (ni != self._base_station): print(ni, node.action, node.parent.overall_score, node.chdList.keys(), node.await_parent, node.parent.node.id, node.timer)
+                    # if (ni == 13): print(ni, node.action, node.orphan_timer, node.chdList.keys())
                     node.timer -= 1
                     # else: print(ni, node.action, node.orphan_timer, node.chdList.keys())
                     if node.state == NodeType.DEAD:
                         continue
                     orphan_msg = None
-                    if(not node.await_parent):
-                        orphan_msg, new_head_orphan = self.observe_parent_potential(ni, 0.5)   # Random threshold for now
+                    if(self._protocol == Protocol.TEAM_C and not node.await_parent and node.action != Action.AWAIT_REQS):
+                        orphan_msg, new_head_orphan = self.observe_parent_potential(ni, 0)   # Random threshold for now
                         # print("orphan: ", orphan_msg)
                         if orphan_msg != None: 
+                            print("orphan: ", orphan_msg)
                             node.action = Action.ORPHAN_ELECTION
                             node.await_parent = True
 
@@ -761,20 +783,19 @@ class NetworkModel:
                             # if(node.ready_to_send): node.action = Action.SEND_DATA
                             continue
                         
-                        msg = self.elect_new_head(ni, 0.5)   # Random threshold for now
+                        msg = self.elect_new_head(ni, 0.7)   # Random threshold for now
                         print("election: ", msg)
                         if msg == None: 
                             # send no_election? small packet to tell them to continue sending data
                             self.send_ready_msg(ni)
-                            # node.action = Action.IDLE
+                            node.action = Action.IDLE
 
                             # if(node.ready_to_send):
                             #     node.action = Action.SEND_DATA
                             # if(node.ready_to_send): node.action = Action.SEND_DATA
                             continue
                         self.send_election_msg(ni, msg)
-                    elif (node.action == Action.ORPHAN_ELECTION) and \
-                        (self._tdma_slot % node.totalSlots == node.tdmaSlot):
+                    elif (node.action == Action.ORPHAN_ELECTION):
 
                         # msg, ch = self.observe_parent_potential(ni, 0.5)   # Random threshold for now
                         # print("orphan: ", msg)
@@ -788,7 +809,7 @@ class NetworkModel:
                     elif (node.action == Action.AWAIT_REQS):
 
                         if(node.orphan_timer != -1): node.orphan_timer -= 1
-                        # print(node.orphan_timer)
+                        print(node.id, "ORPHAN TIMER: ", node.orphan_timer)
                         if(node.orphan_timer == 0):
                             # print("sending message for ", ni, " to ", node.orphans)
                             orph_msg = {
@@ -800,7 +821,6 @@ class NetworkModel:
                                 self.redo_edges()
                             else: 
                                 self.send_election_msg(ni, msg)
-                                print(msg["newHead"])
                             node.action = Action.ELECTION
 
                         # msg = self.elect_new_head(ni, 0)   # Random threshold for now
@@ -819,10 +839,10 @@ class NetworkModel:
         # every so often have a chance to destory a node
         # if a node is destoryed, it gets caught in the NEXT NEXT worthiness score (as it would have had some packets being sent before it died)
         if self._tick % 150 == 0:
-            self.destroy_nodes()
+            self.target_destroy()
         if self._tick % 200 == 0:   
             self.startWorthinessCalc()
-            self.cleanup_dead_nodes()
+            # self.cleanup_dead_nodes()
 
         # self.destroy_nodes()
         self.move_packets()
@@ -914,7 +934,7 @@ class NetworkModel:
         state = node.state.value
         o_score = node.overall_score
 
-        print(ni, o_score)
+        # print(ni, o_score)
 
         if (o_score > Eth): return  # do not update if energy is still high
 
@@ -982,7 +1002,7 @@ class NetworkModel:
             new_head = min(candidates, key= lambda c: self.dist(node, c["node"]))  # elect smallest distance node
             
             # add the new head to chdList
-            node.chdList[new_head["node"].id] = Child(state=new_head["node"].state)
+            node.chdList[new_head["node"].id] = Child(new_head["node"], state=new_head["node"].state)
             # TDMA schedule
             self.create_TDMA_schedule(ni)
             self.spawn_TDMA_packets(ni)
@@ -1019,7 +1039,8 @@ class NetworkModel:
                     self._graph.nodes[child]["node"].state = NodeType(self._graph.nodes[child]["node"].state.value - 1)
 
             node.chdList.update(msg["chdList"])
-            node.chdList[msg["oldHead"]] = Child(state=self._graph.nodes[msg["oldHead"]]["node"].state)
+            node.chdList[msg["oldHead"]] = Child(self._graph.nodes[msg["oldHead"]]["node"],
+                                                 state=self._graph.nodes[msg["oldHead"]]["node"].state)
             del node.chdList[ni]
 
             node.parent = Parent()
@@ -1099,12 +1120,13 @@ class NetworkModel:
         # Check if parent overall score is greater than a threshold
         # print("pot: ", self._graph.nodes[ni]["node"].parent.overall_score)
       
-        if node in self._destroyed:
-            return
-        if(self._graph.nodes[ni]["node"].parent.overall_score > Oth): return None, None
+        if node in self._destroyed or node.id == self._base_station:
+            return None, None
+        if(self._graph.nodes[ni]["node"].parent.worthiness_score > Oth): return None, None
 
         # Parent is dead, move to closest CH
         closest_CH = self.find_closest_CH(node)
+        # node.select_parent(self._graph.nodes[self._base_station]["node"])
         if(closest_CH == None): return None, None
 
         # Set parent to closest_CH
@@ -1129,16 +1151,17 @@ class NetworkModel:
         
         if(closest_CH == None and node.state == NodeType.CLUSTER_HEAD):
             closest_CH = self.search_lists(node, node.relayList)
-            if(closest_CH == None):
-                closest_CH = self._graph.nodes[self._base_station]["node"]
+            # if(closest_CH == None):
+            #     closest_CH = self._graph.nodes[self._base_station]["node"]
         
         elif(closest_CH == None):
             node.state = NodeType.CLUSTER_HEAD
             closest_CH = self.search_lists(node, node.broadcastList)
             if(closest_CH == None):
                 closest_CH = self.search_lists(node, node.relayList)
-                if(closest_CH == None):
-                    closest_CH = self._graph.nodes[self._base_station]["node"]
+        
+        if(closest_CH == None):
+            closest_CH = self._graph.nodes[self._base_station]["node"]
         
         return closest_CH
 
@@ -1146,7 +1169,8 @@ class NetworkModel:
         closest_CH = None
         for neighbor, dist in list:
             if(neighbor.state == NodeType.CLUSTER_HEAD and node.parent.node != neighbor and \
-                (neighbor.id not in node.chdList) and (closest_CH == None or closest_CH[1] > dist)):
+                (neighbor.id not in node.chdList) and (closest_CH == None or closest_CH[1] > dist) and \
+                (neighbor not in self._destroyed)):
                 
                 closest_CH = (neighbor, dist)
         
