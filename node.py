@@ -245,12 +245,12 @@ class Node:
        
         elif message['type'] == "POWERRETURN":
             if sender.id in self.chdList:
-                self.chdList[sender.id].powerFlag = message["power"]  
+                self.chdList[sender.id].powerPercent = message["power"]  
 
         elif (message['type'] == "UPDATESCORE"):
             if self.state == NodeType.DEAD or self.power <=0:
                 return
-            self.chdList[sender.id].powerPercent = message["power"]
+            self.overall_score = message['childworth']
                 
             
     def neighbourCount(self):
@@ -284,7 +284,7 @@ class Node:
             # i think this branch should be unreachable
             print("TEST")
         else:
-            self.parent.overall_score = w + (0.5*self.parent.powerFlag)
+            self.parent.overall_score = w + (0.5*self.parent.powerPercent)
 
     # icd used to calcualte twait time
     # euclidan distance of all the nodes in its neighbour array

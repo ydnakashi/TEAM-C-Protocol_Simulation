@@ -142,7 +142,7 @@ class NetworkModel:
         self._phase: Phase = Phase.INIT_ROLES
         self._loss_interval: int = 5   # change this later
         self._destroyed_prob: dict = {}
-        self._destroyed: list[int] = []
+        self._destroyed: set[int] = set()
         self._to_remove: set[int] = set()
         self._recieved_poweracks: int = 0
         self._received_packets_at_BS: int = 0
@@ -395,9 +395,7 @@ class NetworkModel:
             
                 currChild = childObj.node
                 childWorthiness = 0.5*self.calculate_worthiness_score(childObj.L, childObj.N)
-                # childOverallScore = childWorthiness + (0.5 * childObj.power)
-                # still need a broadcast to get the battery 
-                childObj.overall_score = childWorthiness  #+  0.5 * childObj.powerFlag
+                childObj.overall_score = childWorthiness + (0.5 * childObj.powerPercent)
                 # child has not been sending or receiving packets this whole time and thus is dead
                 # print("child id, parent id, child worthiness ", currChild.id, currNode.id, childWorthiness )
                 if childWorthiness <= 0:
@@ -417,14 +415,15 @@ class NetworkModel:
                         })
                     childObj.L = 0
                     childObj.N = 0
-             
+                print(childId, childWorthiness, childObj.powerPercent, childObj.overall_score)
+            
     def cleanup_dead_nodes(self):
         for ni in self._graph.nodes:
             if ni == 1:
                 continue
             node = self._graph.nodes[ni]["node"]
             if node.id in self._to_remove:
-                self._destroyed.append(node.id)
+                self._destroyed.add(node.id)
     
                 if node.parent is not None:
                     node.parent.node.chdList.pop(node.id, None)
@@ -455,11 +454,11 @@ class NetworkModel:
         new_destroyed = []
         for ni, prob in self._destroyed_prob.items():
             if (random.randrange(0, 100)) < prob and (ni not in self._destroyed):
-                # self._destroyed.append(ni)
+                # self._destroyed.add(ni)
                 self._graph.nodes[ni]["node"].timer = -1
-                self._graph.nodes[ni]["node"].power = 0
+                self._graph.nodes[ni]["node"].powerPercent = 0
                 new_destroyed.append(ni)
-                # self._destroyed.append(self._graph.nodes[ni]["node"].id)
+                # self._destroyed.add(self._graph.nodes[ni]["node"].id)
                 self._graph.nodes[ni]["node"].state = NodeType.DEAD
     
                 # self._graph.nodes[ni]["node"] = Node(ni)  # wipe the data
@@ -470,7 +469,7 @@ class NetworkModel:
     def target_destroy(self, id):
         # self._destroyed.append(id)
         self._graph.nodes[id]["node"].timer = -1
-        self._graph.nodes[id]['node'].power = 0
+        self._graph.nodes[id]['node'].powerPercent = 0
         # self._destroyed.append(self._graph.nodes[id]["node"].id)
         self._graph.nodes[id]['node'].state = NodeType.DEAD
         # self._graph.nodes[ni]["node"] = Node(ni)  # wipe the data
@@ -735,7 +734,7 @@ class NetworkModel:
                     
                     if(not node.await_parent):
                         orphan_msg, new_head_orphan = self.observe_parent_potential(ni, 0.5)   # Random threshold for now
-                        print("orphan: ", orphan_msg)
+                        # print("orphan: ", orphan_msg)
                         if orphan_msg != None: 
                             node.action = Action.ORPHAN_ELECTION
                             node.await_parent = True
@@ -1203,8 +1202,8 @@ class NetworkModel:
         battery = [random.randint(45, 100) for _ in range(20)]
 
         for ni in self._graph.nodes:
-            self._graph.nodes[ni]['node'].power = battery[ni]
-            self._graph.nodes[ni]['node'].powerRatio =  self._graph.nodes[ni]['node'].power /(0.5e9)
+            self._graph.nodes[ni]['node'].powerPercent = battery[ni]
+            self._graph.nodes[ni]['node'].powerPercent =  self._graph.nodes[ni]['node'].power /(0.5e9)
 
     
     # Statistics Collection Functions
