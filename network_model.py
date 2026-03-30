@@ -166,6 +166,8 @@ class NetworkModel:
                 randomBattery = 65
             elif node_id == 7:
                 randomBattery = 98
+            elif node_id == 11: 
+                randomBattery = 75
             else:
                 randomBattery = randomizeBattery(node_id)
             
