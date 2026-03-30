@@ -3,6 +3,8 @@ from enum import Enum, auto
 import math
 import sys
 
+CONSUMPTION_FACTOR = 20
+
 class NodeType(Enum):
     ASLEEP = -1
     AWAKE = 0
@@ -309,13 +311,12 @@ class Node:
             consumption = (len(self.chdList) + 1) * k * (Energy.ENERGY_PER_BIT.value + Energy.ENERGY_DA.value) + Energy.EPSILON_AMP.value * k * d**4
         else:
             consumption = Energy.ENERGY_PER_BIT.value * k + Energy.EPSILON_FS.value * k * d**2
-        self.power -= consumption
+        self.power -= CONSUMPTION_FACTOR*consumption
         self.powerPercent = self.power/(0.5e9) *100
         if self.power < 0:
             self.power = 0
             self.powerPercent = 0
             self.state = NodeType.DEAD
-            print("DEAD", self.id)
 
         # print(f"{self.id}: {self.powerPercent}")
 

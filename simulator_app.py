@@ -1,15 +1,6 @@
 """
 simulator_app.py — View / Controller Layer
 ============================================
-Three-page GUI flow:
-  Page 1 — Input node count and distance matrix
-  Page 2 — Static network topology visualization
-  Page 3 — Live packet simulation with Start / Pause / Stop
-
-All network logic lives in NetworkModel.  This file only does:
-  • tkinter layout and widget management   (View)
-  • Reading user input and calling model   (Controller)
-  • matplotlib rendering of model data     (View)
 """
 
 import tkinter as tk
@@ -623,6 +614,9 @@ class WirelessSimulator(tk.Tk):
             print(f"Elapsed time (Network still running) {self.elapsed_time} seconds")
         else:
             print(f"Network lifetime: {self.network_time_ms:.6f} seconds")
+
+        with open("throughput_data.txt", 'w') as f:
+            f.write("\n".join(str(item) for item in self.model.get_throughput_list()))
 
 # ──────────────────────────────────────────────
 if __name__ == "__main__":

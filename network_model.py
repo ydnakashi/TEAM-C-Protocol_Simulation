@@ -111,7 +111,7 @@ class NetworkModel:
         self._tick: int = 0
         self._delivered: int = 0
         self._dropped: int = 0
-        self._spawn_interval: int = 6
+        self._spawn_interval: int = 3
         self._events: list[str] = []
         self._nodes: list[Node] = []
         self._active: list[Node] = []
@@ -130,8 +130,8 @@ class NetworkModel:
         self._nodes_to_destroy: list[int] = [9, 2]
 
         # Switch based on protocol to run
-        self._protocol: Protocol = Protocol.MI2RSDiC
-        # self._protocol: Protocol = Protocol.TEAM_C
+        # self._protocol: Protocol = Protocol.MI2RSDiC
+        self._protocol: Protocol = Protocol.TEAM_C
 
     # ── Properties ───────────────────────────
     @property
@@ -163,11 +163,9 @@ class NetworkModel:
             node_id = i + 1  
       
             if node_id == 6:
-                randomBattery = 65
+                randomBattery = 20
             elif node_id == 7:
-                randomBattery = 98
-            elif node_id == 11:
-                randomBattery = 98
+                randomBattery = 40
             else:
                 randomBattery = randomizeBattery(node_id)
             
@@ -351,7 +349,8 @@ class NetworkModel:
         t = L/N
         r = 1 - (((12*L*(N-L))**0.5) / ((N+1)*N))
         w = 1 - (((t-1)**2 + (c**2) * (r-1)**2)**0.5 / (1+c**2)**0.5)
-        return t
+        proj_w = (w-0.29)/(1-0.29)
+        return proj_w
     
     def spawn_battery_req(self, ready=True):
         parents = self.get_parent_nodes() 
@@ -372,6 +371,7 @@ class NetworkModel:
             node = self._graph.nodes[ni]["node"]
             # calculate parents score  
             parent_worthiness = self.calculate_worthiness_score(node.parent.L, node.parent.N)
+            print(ni, " power: ", node.powerPercent)
             print("ID, worthyscore, L, N", node.id, parent_worthiness, node.parent.L, node.parent.N)
             
             w_weight = 0.5
@@ -400,6 +400,15 @@ class NetworkModel:
                 childObj.N = 0
                 childObj.L = 0
                 # print("childId, child score: ", chdId, child_overall_score)
+
+        for ni in self._graph.nodes:
+            node = self._graph.nodes[ni]["node"]
+            if node.state == NodeType.DEAD:
+                self.target_destroy(False, ni)
+                # node.timer = -1
+                # node.parent.node.chdList.pop(node.id, None)
+                # self._graph.nodes[ni]["node"] = Node(ni)  # wipe the data
+        # self.redo_edges()
 
 
             
@@ -461,13 +470,17 @@ class NetworkModel:
                 return
         print("destoryed: ", self._destroyed)
 
-    def target_destroy(self):
-        if len(self._nodes_to_destroy) <= 0:
-            return
-        id = self._nodes_to_destroy[0]
-        self._destroyed.add(id)
-        self._nodes_to_destroy.pop(0)
+    def target_destroy(self, random_destroy, id=0):
+        print(self._nodes_to_destroy)
+       
+        if random_destroy == True and len(self._nodes_to_destroy) > 0:
+            id = self._nodes_to_destroy[0]
+            self._nodes_to_destroy.pop(0)
 
+        elif random_destroy == True and len(self._nodes_to_destroy) <= 0:
+            return
+
+        self._destroyed.add(id)
         node = self._graph.nodes[id]["node"]
         node.timer = -1
         node.powerPercent = 0
@@ -541,7 +554,7 @@ class NetworkModel:
     
 
     def move_packets(self):
-        SPEED = 0.10  # fraction-of-hop per tick
+        SPEED = 0.20  # fraction-of-hop per tick
 
         for pkt in self._packets:
             if pkt.status != PacketStatus.IN_TRANSIT:
@@ -560,7 +573,8 @@ class NetworkModel:
                         pkt.progress = 0.0
                         pkt.status = PacketStatus.DELIVERED
                         self._delivered += 1
-                        self._delivered_interval += 1
+                        if pkt.destination == 1:
+                            self._delivered_interval += 1
                         self._events.append(
                             f"[Tick {self._tick:>4}]  PKT #{pkt.packet_id:>3} "
                             f"DELIVERED → Node {pkt.destination}"
@@ -783,9 +797,8 @@ class NetworkModel:
                             # if(node.ready_to_send): node.action = Action.SEND_DATA
                             continue
                         
-                        msg = self.elect_new_head(ni, 0.7)   # Random threshold for now
-                        print("election: ", msg)
-                        if msg == None: 
+                        msg = self.elect_new_head(ni, 0.25)   # Random threshold for now
+                        if msg == None:
                             # send no_election? small packet to tell them to continue sending data
                             self.send_ready_msg(ni)
                             node.action = Action.IDLE
@@ -794,6 +807,7 @@ class NetworkModel:
                             #     node.action = Action.SEND_DATA
                             # if(node.ready_to_send): node.action = Action.SEND_DATA
                             continue
+                        print("election: ", msg)
                         self.send_election_msg(ni, msg)
                     elif (node.action == Action.ORPHAN_ELECTION):
 
@@ -839,10 +853,16 @@ class NetworkModel:
         # every so often have a chance to destory a node
         # if a node is destoryed, it gets caught in the NEXT NEXT worthiness score (as it would have had some packets being sent before it died)
         if self._tick % 150 == 0:
-            self.target_destroy()
+            self.target_destroy(True)
         if self._tick % 200 == 0:   
             self.startWorthinessCalc()
             # self.cleanup_dead_nodes()
+        if self._tick % 250 == 0 and not self.network_dead():
+            self.throughput()
+
+        if self._tick % 50 == 0:
+            if(self.network_dead()): dead = True
+            self._delivered_interval = 0   # reset interval to determine when network dies
 
         # self.destroy_nodes()
         self.move_packets()
@@ -1245,7 +1265,7 @@ class NetworkModel:
         # what is the speed?
         pass
 
-    def throughput(self, interval=250):
+    def throughput(self):
         self._throughputs.append(self._received_packets_at_BS)
         self._received_packets_at_BS = 0
 
@@ -1254,9 +1274,12 @@ class NetworkModel:
         if(len(self._throughputs) == 0): return 0
         return sum(self._throughputs) / (len(self._throughputs))
     
+    def get_throughput_list(self):
+        return self._throughputs
+    
 
     # this is seeded randomness
 def randomizeBattery(seed):
     random.seed(seed)
     # cap the battery at 45%
-    return float(random.randint(45, 100))
+    return float(random.randint(15, 40))
