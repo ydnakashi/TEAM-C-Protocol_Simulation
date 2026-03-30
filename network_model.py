@@ -130,8 +130,8 @@ class NetworkModel:
         self._nodes_to_destroy: list[int] = [9, 2]
 
         # Switch based on protocol to run
-        # self._protocol: Protocol = Protocol.MI2RSDiC
-        self._protocol: Protocol = Protocol.TEAM_C
+        self._protocol: Protocol = Protocol.MI2RSDiC
+        # self._protocol: Protocol = Protocol.TEAM_C
 
     # ── Properties ───────────────────────────
     @property
