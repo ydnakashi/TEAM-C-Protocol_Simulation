@@ -3,7 +3,7 @@ from enum import Enum, auto
 import math
 import sys
 
-CONSUMPTION_FACTOR = 20
+CONSUMPTION_FACTOR = 10
 
 class NodeType(Enum):
     ASLEEP = -1

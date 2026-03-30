@@ -163,11 +163,14 @@ class NetworkModel:
             node_id = i + 1  
       
             if node_id == 6:
-                randomBattery = 20
+                randomBattery = 30
             elif node_id == 7:
-                randomBattery = 40
+                randomBattery = 100
+            elif node_id == 4: 
+                randomBattery = 75
             else:
                 randomBattery = randomizeBattery(node_id)
+            
             
             self._graph.add_node(i+1, label=f"Node{i+1}", node=(Node(id=node_id, powerPercent=randomBattery,coords=[coords[i][0], coords[i][1]], Rc=link_range))
             )
@@ -553,7 +556,7 @@ class NetworkModel:
     
 
     def move_packets(self):
-        SPEED = 0.20  # fraction-of-hop per tick
+        SPEED = 0.10  # fraction-of-hop per tick
 
         for pkt in self._packets:
             if pkt.status != PacketStatus.IN_TRANSIT:
@@ -743,12 +746,15 @@ class NetworkModel:
                 self.twaitCalculation()
                 self.stateSelection()
                 self.clusterCreation()
+                # self._graph.nodes[6]["node"].powerPercent = 35
+                # self._graph.nodes[7]["node"].powerPercent = 40
 
                 self.init_TDMA()
                 self.redo_edges()
 
                 self.init_destruction_probabilities()
                 self.init_actions()
+
                 # use the same number to get the same seeded random battery life
                 # self.target_destroy(11)
                 # print(self._destroyed)
@@ -802,7 +808,7 @@ class NetworkModel:
                             # if(node.ready_to_send): node.action = Action.SEND_DATA
                             continue
                         
-                        msg = self.elect_new_head(ni, 0.25)   # Random threshold for now
+                        msg = self.elect_new_head(ni, 0.5)   # Random threshold for now
                         if msg == None:
                             # send no_election? small packet to tell them to continue sending data
                             self.send_ready_msg(ni)
