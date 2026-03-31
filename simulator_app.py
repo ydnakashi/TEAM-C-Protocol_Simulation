@@ -20,8 +20,10 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import networkx as nx
+import time
 
 from network_model import NetworkModel, LayoutResult
+from node import STATE_STYLE
 
 
 # ──────────────────────────────────────────────
@@ -48,7 +50,7 @@ TITLE_FONT  = ("Segoe UI", 18, "bold")
 MONO        = ("Consolas", 9)
 MONO_SM     = ("Consolas", 8)
 
-TICK_MS = 80          # milliseconds between simulation ticks
+TICK_MS = 40          # milliseconds between simulation ticks
 
 
 class WirelessSimulator(tk.Tk):
@@ -77,6 +79,11 @@ class WirelessSimulator(tk.Tk):
         # ── Page container ───────────────────
         self.container = tk.Frame(self, bg=BG)
         self.container.pack(fill="both", expand=True)
+
+        # Metrics
+        self.network_time_ms = 0
+        self.elapsed_time = 0
+        self.curr_start = 0
 
         self.show_page("input")
 
@@ -128,7 +135,7 @@ class WirelessSimulator(tk.Tk):
                    insertbackground=FG, relief="flat").pack(side="left", padx=(4, 12))
 
         tk.Label(top, text="Link Range:", font=FONT_BOLD, bg=BG, fg=FG).pack(side="left")
-        self.range_var = tk.StringVar(value="1.5")
+        self.range_var = tk.StringVar(value="2.0")
         tk.Spinbox(top, from_=0.5, to=50.0, increment=0.5, width=5,
                    textvariable=self.range_var,
                    font=FONT, bg=ENTRY_BG, fg=FG, buttonbackground=BTN_BG,
@@ -315,21 +322,21 @@ class WirelessSimulator(tk.Tk):
 
         stats = self.model.get_stats()
         conn = "fully connected" if stats.is_connected else f"{stats.num_components} component(s)"
-        tk.Label(frame,
-                 text=f"Nodes: {stats.num_nodes}    Edges: {stats.num_edges}    Topology: {conn}",
-                 font=MONO, bg=BG, fg=FG_DIM).pack(anchor="w", pady=(4, 4))
+        # tk.Label(frame,
+        #          text=f"Nodes: {stats.num_nodes}    Edges: {stats.num_edges}    Topology: {conn}",
+        #          font=MONO, bg=BG, fg=FG_DIM).pack(anchor="w", pady=(4, 4))
 
-        edge_str = "  ".join(f"({u}↔{v} {d['weight']:.0f}m)" for u, v, d in stats.edges)
-        tk.Label(frame, text=f"Links: {edge_str}", font=MONO,
-                 bg=BG, fg=FG_DIM, wraplength=900, justify="left"
-                 ).pack(anchor="w", pady=(0, 4))
+        # edge_str = "  ".join(f"({u}↔{v} {d['weight']:.0f}m)" for u, v, d in stats.edges)
+        # tk.Label(frame, text=f"Links: {edge_str}", font=MONO,
+        #          bg=BG, fg=FG_DIM, wraplength=900, justify="left"
+        #          ).pack(anchor="w", pady=(0, 4))
 
         fn_frame = tk.Frame(frame, bg=BG_DARK, relief="flat", bd=1)
         fn_frame.pack(fill="x", pady=(0, 6))
-        tk.Label(fn_frame,
-                 text="NetworkX:  " + " · ".join(self.model.nx_functions_used()),
-                 font=MONO_SM, bg=BG_DARK, fg=ACCENT2,
-                 wraplength=900, justify="left").pack(padx=8, pady=4)
+        # tk.Label(fn_frame,
+        #          text="NetworkX:  " + " · ".join(self.model.nx_functions_used()),
+        #          font=MONO_SM, bg=BG_DARK, fg=ACCENT2,
+        #          wraplength=900, justify="left").pack(padx=8, pady=4)
 
         self._render_static_network(frame, self._layout)
 
@@ -347,23 +354,25 @@ class WirelessSimulator(tk.Tk):
 
     def _render_static_network(self, parent: tk.Frame, layout: LayoutResult) -> None:
         G = self.model.graph
+
+        print("size ", G.size)
         fig = Figure(figsize=(9.0, 3.6), facecolor=BG)
         ax = fig.add_subplot(111)
         ax.set_facecolor(BG); ax.axis("off")
         ax.set_title("Wireless Network Topology", color=FG, fontsize=13,
                       fontweight="bold", pad=10)
         pos = layout.positions
-        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=EDGE_COLOR,
-                               width=2, alpha=0.7)
+        # nx.draw_networkx_edges(G, pos, ax=ax, edge_color=EDGE_COLOR,
+        #                        width=2, alpha=0.7)
         nx.draw_networkx_nodes(G, pos, ax=ax, node_color=NODE_COLOR,
                                node_size=600, edgecolors="#11111b", linewidths=2)
         nx.draw_networkx_labels(G, pos, ax=ax, labels=layout.node_labels,
                                 font_size=9, font_color="#11111b", font_weight="bold")
-        nx.draw_networkx_edge_labels(
-            G, pos, ax=ax, edge_labels=layout.edge_labels,
-            font_size=8, font_color=ACCENT2,
-            bbox=dict(boxstyle="round,pad=0.2", facecolor=BG_DARK,
-                      edgecolor=ACCENT2, alpha=0.8))
+        # nx.draw_networkx_edge_labels(
+        #     G, pos, ax=ax, edge_labels=layout.edge_labels,
+        #     font_size=8, font_color=ACCENT2,
+        #     bbox=dict(boxstyle="round,pad=0.2", facecolor=BG_DARK,
+        #               edgecolor=ACCENT2, alpha=0.8))
         fig.tight_layout()
         canvas = FigureCanvasTkAgg(fig, master=parent)
         canvas.draw()
@@ -395,8 +404,9 @@ class WirelessSimulator(tk.Tk):
         tk.Label(cfg, text="Base station:", font=FONT_BOLD,
                  bg=BG, fg=FG).pack(side="left")
         nodes = self.model.get_nodes()
-        self._base_var = tk.StringVar(value=str(nodes[-1]))  # default: last node
-        tk.OptionMenu(cfg, self._base_var, *[str(n) for n in nodes]).pack(side="left", padx=6)
+        self._base_var = tk.StringVar(value=str(nodes[0]))  # default: last node
+        self._base_menu = tk.OptionMenu(cfg, self._base_var, *[str(n) for n in nodes])
+        self._base_menu.pack(side="left", padx=6)
 
         # ── Control buttons ──────────────────
         btn_frame = tk.Frame(cfg, bg=BG)
@@ -467,9 +477,11 @@ class WirelessSimulator(tk.Tk):
         if not self._running:
             # Fresh start or resume
             self._running = True
+            self._base_menu.configure(state="disabled")
             self._btn_start.configure(state="disabled")
             self._btn_pause.configure(state="normal")
             self._btn_stop.configure(state="normal")
+            self.curr_start = time.perf_counter()
             self._tick_loop()
 
     def _on_pause(self) -> None:
@@ -477,6 +489,7 @@ class WirelessSimulator(tk.Tk):
         self._stop_animation()
         self._btn_start.configure(state="normal", text="▶  Resume")
         self._btn_pause.configure(state="disabled")
+        self.elapsed_time += time.perf_counter() - self.curr_start
 
     def _on_stop(self) -> None:
         self._running = False
@@ -510,6 +523,11 @@ class WirelessSimulator(tk.Tk):
             f"Delivered: {snapshot.delivered_count}"
         )
 
+        if(snapshot.dead and self.network_time_ms == 0):
+            print()
+            print("Network is dead... close program to see stats")
+            self.network_time_ms = self.elapsed_time + (time.perf_counter() - self.curr_start)
+
         # Append log events
         for line in snapshot.events:
             self._append_log(line + "\n")
@@ -538,11 +556,14 @@ class WirelessSimulator(tk.Tk):
                                width=2, alpha=0.5)
 
         # ── Nodes — base station highlighted ─
-        regular = [n for n in G.nodes() if n != base]
-        if regular:
-            nx.draw_networkx_nodes(G, pos, ax=ax, nodelist=regular,
-                                   node_color=NODE_COLOR, node_size=500,
-                                   edgecolors="#11111b", linewidths=2)
+        for state in STATE_STYLE.keys():
+            nodes = [n for n in G.nodes().keys() if G.nodes()[n]["node"].state == state]
+            color, alpha, size = STATE_STYLE.get(state, ("#ffffff", 1.0, 200))
+            nx.draw_networkx_nodes(G, pos, ax=ax, nodelist=nodes,
+                                   node_color=color, node_size=size,
+                                   edgecolors="#11111b", linewidths=2, 
+                                   alpha=alpha)
+        # Base station
         nx.draw_networkx_nodes(G, pos, ax=ax, nodelist=[base],
                                node_color=BASE_COLOR, node_size=700,
                                edgecolors="#11111b", linewidths=2.5,
@@ -555,17 +576,18 @@ class WirelessSimulator(tk.Tk):
                                 font_size=8, font_color="#11111b", font_weight="bold")
 
         # ── Edge distance labels ─────────────
-        nx.draw_networkx_edge_labels(
-            G, pos, ax=ax, edge_labels=layout.edge_labels,
-            font_size=7, font_color=ACCENT2,
-            bbox=dict(boxstyle="round,pad=0.15", facecolor=BG_DARK,
-                      edgecolor=ACCENT2, alpha=0.7))
+        # nx.draw_networkx_edge_labels(
+        #     G, pos, ax=ax, edge_labels=layout.edge_labels,
+        #     font_size=7, font_color=ACCENT2,
+        #     bbox=dict(boxstyle="round,pad=0.15", facecolor=BG_DARK,
+        #               edgecolor=ACCENT2, alpha=0.7))
 
         # ── Packets (animated dots) ──────────
         pkt_positions = self.model.get_packet_render_positions(layout)
         for px, py, pid, delivered in pkt_positions:
-            color = PKT_DELIVER if delivered else PKT_COLOR
-            size = 60 if delivered else 100
+            if delivered: continue
+            color = PKT_COLOR
+            size = 100
             ax.scatter(px, py, s=size, c=color, zorder=10,
                        edgecolors="#11111b", linewidths=1.0, alpha=0.9)
             ax.annotate(f"#{pid}", (px, py), fontsize=6,
@@ -591,8 +613,21 @@ class WirelessSimulator(tk.Tk):
             self._log_text.see("end")
             self._log_text.configure(state="disabled")
 
+    def display_metric(self):
+        print()
+        print("STATISTICS OF THE NETWORK:")
+        avg_throughput = self.model.avg_throughput()
+        print(f"Final average throughput: {avg_throughput} packets/250 ticks")
+        if(self.network_time_ms == 0):
+            self.elapsed_time += time.perf_counter() - self.curr_start
+            print(f"Elapsed time (Network still running) {self.elapsed_time} seconds")
+        else:
+            print(f"Network lifetime: {self.network_time_ms:.6f} seconds")
 
 # ──────────────────────────────────────────────
 if __name__ == "__main__":
     app = WirelessSimulator()
     app.mainloop()
+
+    # Print out metrics
+    app.display_metric()

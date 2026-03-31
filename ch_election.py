@@ -2,6 +2,8 @@ import networkx as nx
 import math
 import copy
 
+from node import Child
+
 # FOR CH AND S_CH
 # if W < t, re-elect
 
@@ -41,60 +43,62 @@ def dist(a, b):
     return math.sqrt((x1-x2)**2 + (y1-y2)**2)
 
 # Current CH or S_CH enters the head update phase
-def elect_new_head(G, head, Eth):
-    state = head["state"]
-    energy = head["energy"]
+def elect_new_head(G, ni, Eth):
+    node = G.nodes[ni]["node"]
+    state = node.state
+    energy = node.energy
 
     # CHANGE THIS TO OVERALL SCORE??
     if (energy > Eth): return  # do not update if energy is still high
 
-    children = head["chdList"]
+    children = node.chdList
 
     # Choose a node within the children that fit the criteria
     candidates = [
         G.nodes[child] for child in children
-        if G.nodes[child]["state"] == state+1 and G.nodes[child]["energy"] > Eth
+        if G.nodes[child]["node"].state == state+1 and G.nodes[child]["node"].energy > Eth
     ]
 
     if candidates:
-        new_head = min(candidates, key= lambda c: dist(head, c))  # elect smallest distance node
+        new_head = min(candidates, key= lambda c: dist(node, c))  # elect smallest distance node
         
         # send UPDATE_HEAD with ID of new head, ChdList, ID of this node, parent ID, type of msg
         UPDATE_HEAD = {
-            "newHead": new_head["id"],
-            "chdList": head["chdList"],
-            "oldHead": head["id"],
-            "oldParent": head["parent"],
+            "newHead": G.nodes[new_head]["nodes"].id,
+            "chdList": node.chdList,
+            "oldHead": node.id,
+            "oldParent": node.parent,
             "type": "UPDATE_HEAD"
         }
 
         # delete chdList
-        head["chdList"] = {}
+        node.chdList = {}
         # update parent to new head
-        head["parent"] = new_head
+        node.parent = new_head
         # update state
-        head["state"] += 1
+        node.state += 1
 
         return UPDATE_HEAD, new_head
 
     # send UPDATE_NOHEAD with ChdList and parent ID, NodeID, type
     UPDATE_NOHEAD = {
-        "chdList": head["chdList"],
-        "oldHead": head["id"],
-        "newHead": head["parent"],
+        "chdList": node.chdList,
+        "oldHead": node.id,
+        "newHead": node.parent,
         "type": "UPDATE_NOHEAD"
     }
     # delete ChdList
-    head["chdList"] = {}
+    node.chdList = {}
 
     return UPDATE_NOHEAD, None  # no possible candidates
 
 # Elect new head within orphaned nodes
-def elect_new_head_orphans(G, node, msg, Eth):
+def elect_new_head_orphans(G, ni, msg, Eth):
+    node = G.nodes[ni]["node"]
     # Choose a node within the children that fit the criteria
     candidates = [
         G.nodes[child] for child in msg["chdList"]
-        if G.nodes[child]["state"] == (node["state"])+1 and G.nodes[child]["energy"] > Eth
+        if G.nodes[child]["node"].state == (node.state)+1 and G.nodes[child]["node"].energy > Eth
     ]
 
     if candidates:
@@ -102,22 +106,22 @@ def elect_new_head_orphans(G, node, msg, Eth):
         
         # send UPDATE_HEAD_ORPHAN with ID of new head, ChdList, ID of this node, parent ID, type of msg
         UPDATE_HEAD_ORPHAN = {
-            "newHead": new_head["id"],
+            "newHead": G.nodes[new_head]["node"].id,
             "chdList": msg["chdList"],
-            "oldHead": node["id"],
-            "oldParent": node["parent"],
+            "oldHead": node.id,
+            "oldParent": node.parent,
             "type": "UPDATE_HEAD_ORPHAN"
         }
 
         # add the new head to chdList
-        node["chdList"][new_head["id"]] = -1
-        # TDMA schedule
+        node.chdList[G.nodes[new_head]["node"].id] = Child(state=G.nodes[new_head]["node"].state)
+        # TDMA schedule (use the one from network model)
         node = create_TDMA_schedule(node)
 
         return UPDATE_HEAD_ORPHAN, new_head
 
     # else, keep them all as children
-    node["chdList"].update(msg["chdList"])
+    node.chdList.update(msg["chdList"])
     # TDMA schedule
     node = create_TDMA_schedule(node)
 
@@ -126,52 +130,54 @@ def elect_new_head_orphans(G, node, msg, Eth):
     return None  # no possible candidates
 
 # Nodes update themselves when receiving UPDATE_HEAD or UPDATE_HEAD_ORPHANED message
-def child_update_new_head(node, msg):
+def child_update_new_head(G, ni, msg):
+    node = G.nodes[ni]["node"]
     # If this is the new head, update itself as parent
-    if (node["id"] == msg["newHead"]):
+    if (node.id == msg["newHead"]):
         # update state to new state
-        node["state"] -= 1
+        node.state -= 1
         # if chdList is not empty, update the children state to state-1
-        chdList = node["chdList"]
+        chdList = node.chdList
         if (len(chdList) > 0):
             for child in chdList:
-                child["state"] -= 1
+                G.nodes[child]["node"].state -= 1
             # then add the chdList from the message to its own list
-            node["chdList"].update(copy.deepcopy(msg["chdList"]))
-            del node["chdList"][node["id"]]
+            node.chdList.update(copy.deepcopy(msg["chdList"]))
+            del node.chdList[node.id]
             # create new TDMA schedule
             node = create_TDMA_schedule(node)
 
         # if ChdList is empty, add ChdList
         else:
-            node["chdList"] = copy.deepcopy(msg["chdList"])
-            del node["chdList"][node["id"]]
+            node.chdList = copy.deepcopy(msg["chdList"])
+            del node.chdList[node.id]
 
         # Update parent of itself to parent in the message only if not orphaned
-        if (msg["type"] != "UPDATE_HEAD_ORPHAN"): node["parent"] = msg["oldParent"]
+        if (msg["type"] != "UPDATE_HEAD_ORPHAN"): node.parent = msg["oldParent"]
 
-    elif(node["id"] == msg["oldParent"]):
+    elif(node.id == msg["oldParent"]):
         # Take out old head and add new head to chdList
-        old_slot = node["chdList"][msg["oldHead"]]
-        del node["chdList"][msg["oldHead"]]
-        node["chdList"][msg["newHead"]] = old_slot  # use the time slot of the old head
+        old_slot = node.chdList[msg["oldHead"]]
+        del node.chdList[msg["oldHead"]]
+        node.chdList[msg["newHead"]] = old_slot  # use the time slot of the old head
 
     # If this is a child, update its parent to new head
     else:
-        node["parent"] = msg["newHead"]
+        node.parent = msg["newHead"]
 
     return node
 
 # Any node that receives UPDATE_NOHEAD message udpates itself
-def update_no_head(node, msg):
+def update_no_head(G, ni, msg):
+    node = G.nodes[ni]["node"]
     # if node is one of the children from the message, update its parent to the parent in the message
-    if(node["id"] in msg["chdList"]):
-        node["parent"] = msg["newHead"]
-        if(node["state"] == 3): node["state"] -= 1  # move state one down if ON
+    if(node.id in msg["chdList"]):
+        node.parent = msg["newHead"]
+        if(node.state == 3): node.state -= 1  # move state one down if ON
 
     # if the node is the parent in the message, add the children to its chdList
-    elif(node["id"] == msg["newHead"]):
-        node["chdList"].update(msg["chdList"].copy())
+    elif(node.id == msg["newHead"]):
+        node.chdList.update(msg["chdList"].copy())
         # Create new TDMA schedule
         node = create_TDMA_schedule(node)
         # Broadcast MEMBERACK
@@ -183,15 +189,16 @@ def update_no_head(node, msg):
     return node
 
 # Observe if parent is still viable during election phase
-def observe_parent_potential(G, node, Oth):
+def observe_parent_potential(G, ni, Oth):
+    node = G.nodes[ni]["node"]
     # Check if parent overall score is greater than a threshold
-    if(G.nodes[node["parent"]]["overall_score"] > Oth): return
+    if(G.nodes[node.parent]["node"].overall_score > Oth): return
 
     # Parent is dead, move to closest CH
     closest_CH = find_closest_CH(node)
 
     # Set parent to closest_CH
-    node["parent"] = closest_CH
+    node.parent = closest_CH
 
     # Send REQUEST_PARENT message to new parent
     REQUEST_PARENT = {
@@ -206,14 +213,14 @@ def find_closest_CH(node):
     pass
 
 # Create new TDMA schedule for children
-def create_TDMA_schedule(node):
-    slot = 0
+# def create_TDMA_schedule(node):
+#     slot = 0
 
-    for child in node["chdList"]:
-        node["chdList"][child] = slot
-        slot+=1
+#     for child in node["chdList"]:
+#         node["chdList"][child] = slot
+#         slot+=1
 
-    return node
+#     return node
 
 # G = nx.Graph()
 # G.add_node(100, id=100, parent=-1, chdList={0:1}, state=1, energy=10, pos=[1,0])
