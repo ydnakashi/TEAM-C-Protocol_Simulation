@@ -336,8 +336,7 @@ class NetworkModel:
             msg = {
                 "schd": schedule,
                 "tt": len(parent_node.chdList),
-                "ready": ready,
-                "type": "MEMBERACK",
+                "type": "MEMBERACK"
             }
             self.spawn_packet(msg, parent_id, child_id)
 
@@ -539,6 +538,9 @@ class NetworkModel:
         elif msg_type == "UPDATE_HEAD_ORPHAN":
             self.update_new_head_orphan(pkt.destination, pkt.content)
             self._rebuild_edges()
+        elif msg_type == "UPDATE_NOHEAD_ORPHAN":
+            self.update_no_head_orphan(pkt.destination, pkt.content)
+            self._rebuild_edges()
         elif msg_type == "READY":
             self._handle_ready(node, pkt)
         elif msg_type == "REQUEST_PARENT":
@@ -582,7 +584,6 @@ class NetworkModel:
             node.action = Action.SEND_DATA
         elif node.action == Action.ORPHAN_ELECTION:
             node.action = Action.ELECTION
-        node.ready_to_send = True
 
     def _handle_request_parent(self, node: Node, pkt: Packet):
         if node.orphan_timer == -1:
@@ -599,6 +600,7 @@ class NetworkModel:
     # ══════════════════════════════════════════
 
     def send_data_packet(self, ni):
+        """Send data to parent in DATA_MSG message"""
         node = self._get_node(ni)
 
         if node.parent is None or ni not in node.parent.node.chdList:
@@ -619,7 +621,6 @@ class NetworkModel:
         node.orphans = {}
         node.reset_waiting()
         node.timer = self._loss_interval * len(node.chdList)
-        node.ready_to_send = False
 
     def send_data_ack(self, pkt):
         """Send acknowledgement back to the child that sent data."""
@@ -737,7 +738,12 @@ class NetworkModel:
                     node.action = Action.ORPHAN_ELECTION
                     node.await_parent = True
 
-            # Action dispatch
+            # For edge case where there is just a node left with no children connected to the BS
+            if(len(node.chdList) == 0 and node.parent and node.parent.node and node.parent.node.id == self._base_station and node.action == Action.IDLE and node.timer<=0):
+                node.action = Action.SEND_DATA
+                node.timer = self._loss_interval
+
+            # Send data packet during your TDMA time slot
             if self._should_send_data(ni, node):
                 self.send_data_packet(ni)
 
@@ -939,8 +945,14 @@ class NetworkModel:
         # No candidate: absorb all orphans as children
         node.chdList.update(orphan_list)
         self.create_TDMA_schedule(ni)
-        self.spawn_TDMA_packets(ni)
-        return None
+        self.spawn_TDMA_packets(ni) 
+
+        UPDATE_NOHEAD_ORPHAN = {
+                "chdList": msg["chdList"],
+                "type": "UPDATE_NOHEAD_ORPHAN"
+            }  # no possible candidates
+        
+        return UPDATE_NOHEAD_ORPHAN
 
     # ══════════════════════════════════════════
     #  Election message handlers
@@ -962,7 +974,8 @@ class NetworkModel:
             old_head_node = self._get_node(msg["oldHead"])
             node.chdList[msg["oldHead"]] = Child(old_head_node, state=old_head_node.state)
             del node.chdList[ni]
-            # Set parent
+
+            # Update parent to new parent
             node.parent = Parent()
             node.parent.node = self._get_node(msg["oldParent"])
             node.tdmaSlot = msg["oldHeadSchd"][0]
@@ -981,6 +994,8 @@ class NetworkModel:
             node.parent = Parent()
             node.parent.node = self._get_node(msg["newHead"])
 
+        return node
+
     def update_no_head(self, ni, msg):
         """Process UPDATE_NOHEAD message: merge children into the old head's parent."""
         node = self._get_node(ni)
@@ -995,8 +1010,9 @@ class NetworkModel:
         elif node.id == msg["newHead"]:
             node.chdList.update(msg["chdList"])
             self.create_TDMA_schedule(ni)
-            ready = node.action != Action.ELECTION
-            self.spawn_TDMA_packets(ni, ready)
+            self.spawn_TDMA_packets(ni)  # Broadcast MEMBERACK
+
+        return node
 
     def update_new_head_orphan(self, ni, msg):
         """Process UPDATE_HEAD_ORPHAN message: promote an orphan to head."""
@@ -1015,17 +1031,30 @@ class NetworkModel:
             node.parent = Parent()
             node.parent.node = self._get_node(msg["newHead"])
 
-    # ══════════════════════════════════════════
-    #  Orphan detection (TEAM-C only)
-    # ══════════════════════════════════════════
+        return node
 
-    def observe_parent_potential(self, ni, threshold):
-        """Check if this node's parent is still viable. Returns (message, new_parent) or (None, None)."""
+    def update_no_head_orphan(self, ni, msg):
+        """Called when a node receives an UPDATEE_NOHEAD_ORPHAN message"""
+        node = self._graph.nodes[ni]["node"]
+        node_state = node.state
+        
+        # if chdList is not empty, update the children state to state-1
+        chdList = node.chdList
+        if (len(chdList) > 0):
+            for child in chdList:
+                child_state = self._graph.nodes[child]["node"].state
+                if(child_state.value - node_state.value > 1 and child_state != NodeType.CLUSTER_HEAD):
+                    self._graph.nodes[child]["node"].state = NodeType(child_state.value - 1)
+
+        return node
+
+    def observe_parent_potential(self, ni, Oth):
+        """Observe if parent is still viable during election phase"""
         node = self._get_node(ni)
-
-        if node.id in self._destroyed or node.id == self._base_station:
+      
+        if node in self._destroyed or node.id == self._base_station:
             return None, None
-        if node.parent.worthiness_score > threshold:
+        if node.parent.worthiness_score > Oth:
             return None, None
 
         closest_ch = self._find_closest_ch(node)

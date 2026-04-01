@@ -98,7 +98,6 @@ class Node:
 
         # State machine
         self.action = Action.IDLE
-        self.ready_to_send = True
         self.pkt = None
         self.orphans = {}
         self.await_parent = False
