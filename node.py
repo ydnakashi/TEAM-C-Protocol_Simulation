@@ -3,6 +3,7 @@ from enum import Enum
 import math
 import sys
 
+CONSUMPTION_FACTOR = 1
 
 class NodeType(Enum):
     ASLEEP = -1
@@ -306,7 +307,7 @@ class Node:
             consumption = (Energy.ENERGY_PER_BIT.value * k +
                            Energy.EPSILON_FS.value * k * d**2)
 
-        self.power -= consumption
+        self.power -= CONSUMPTION_FACTOR * consumption
         if self.power <= 0:
             self.power = 0
             self.powerPercent = 0

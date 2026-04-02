@@ -178,6 +178,7 @@ class NetworkModel:
                     self._graph.add_edge(i + 1, j + 1, weight=dist)
 
     def build_from_coordinates(self, coords: list[tuple[float, float]], link_range: float = 2.0) -> None:
+        """Create graph from list of coordinates input by user"""
         self._graph.clear()
         n = len(coords)
 
@@ -229,6 +230,7 @@ class NetworkModel:
     # ══════════════════════════════════════════
 
     def get_stats(self) -> NetworkStats:
+        """Get information to display on th simulation"""
         G = self._graph
         has_nodes = G.number_of_nodes() > 0
         return NetworkStats(
@@ -260,6 +262,7 @@ class NetworkModel:
     # ══════════════════════════════════════════
 
     def set_base_station(self, node_id: int) -> None:
+        """Initialize base station"""
         if node_id not in self._graph.nodes():
             raise ValueError(f"Node {node_id} not in graph")
         self._base_station = node_id
@@ -634,6 +637,8 @@ class NetworkModel:
             node.action = Action.SEND_DATA
 
     def send_election_msg(self, ni, msg):
+        """Send message to children and parent if applicable to trigger a re-election"""
+        if(msg["type"] == "UPDATE_HEAD"):
         if msg["type"] == "UPDATE_HEAD":
             self.spawn_packet(msg, ni, msg["oldParent"])
         elif msg["type"] == "UPDATE_NOHEAD":
