@@ -1126,3 +1126,6 @@ class NetworkModel:
         if not self._throughputs:
             return 0
         return sum(self._throughputs) / len(self._throughputs)
+
+    def get_throughput_list(self):
+        return self._throughputs
