@@ -57,6 +57,7 @@ class WirelessSimulator(tk.Tk):
         self.distance_entries: list[list[tk.Entry]] = []
         self._grid_coords: list[tuple[float, float]] = []
         self._link_range: float = 2.0
+        self._destroy_list: list[int] = [9, 2]
         self._layout: LayoutResult | None = None
 
         # Simulation animation
@@ -163,6 +164,7 @@ class WirelessSimulator(tk.Tk):
         self.coord_text = tk.Text(
             text_frame, font=MONO, bg=ENTRY_BG, fg=FG,
             insertbackground=FG, relief="flat", wrap="none",
+            height=14,
             yscrollcommand=coord_sb_y.set, xscrollcommand=coord_sb_x.set,
         )
         coord_sb_y.configure(command=self.coord_text.yview)
@@ -175,6 +177,20 @@ class WirelessSimulator(tk.Tk):
                   bg=BTN_BG, fg=FG, activebackground=ACCENT,
                   relief="flat", padx=10, pady=4,
                   command=self._update_grid_preview).pack(fill="x", pady=(6, 0))
+
+        tk.Label(right, text="Nodes to Destroy", font=FONT_BOLD,
+                 bg=BG, fg=ERR).pack(anchor="w", pady=(10, 0))
+        tk.Label(right, text="Comma-separated IDs:  9, 2", font=MONO,
+                 bg=BG, fg=FG_DIM).pack(anchor="w", pady=(2, 4))
+        destroy_frame = tk.Frame(right, bg=BG_DARK)
+        destroy_frame.pack(fill="both", expand=False)
+        self.destroy_text = tk.Text(
+            destroy_frame, font=MONO, bg=ENTRY_BG, fg=FG,
+            insertbackground=FG, relief="flat", wrap="word",
+            height=3,
+        )
+        self.destroy_text.insert("1.0", "9, 2")
+        self.destroy_text.pack(fill="both", expand=True, padx=2, pady=2)
 
         # Buttons to move pages
         nav = tk.Frame(frame, bg=BG)
@@ -282,6 +298,24 @@ class WirelessSimulator(tk.Tk):
                 "Enter at least 2 node coordinates."); return None
         return coords
 
+    def _parse_destroy_list(self) -> list[int]:
+        """Parse comma-separated node IDs from the destroy text field."""
+        raw = self.destroy_text.get("1.0", "end").strip()
+        if not raw:
+            return []
+        ids = []
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError:
+                messagebox.showerror("Parse error",
+                    f"Invalid node ID in destroy list: {part!r}")
+                return []
+        return ids
+
     def _go_to_graph(self) -> None:
         coords = self._parse_coordinate_text()
         if coords is None:
@@ -294,6 +328,8 @@ class WirelessSimulator(tk.Tk):
         self._link_range = link_range
         self.num_nodes = len(coords)
         self.model._protocol = Protocol.TEAM_C if self._protocol_var.get() == "TEAM-C" else Protocol.MI2RSDiC
+        self._destroy_list = self._parse_destroy_list()
+        self.model._nodes_to_destroy = list(self._destroy_list)
         self.model.build_from_coordinates(coords, link_range)
         if not self.model.has_edges():
             messagebox.showwarning(
@@ -467,7 +503,8 @@ class WirelessSimulator(tk.Tk):
         self._running = False
         self._stop_animation()
         self.model.reset_simulation()
-        # Rebuild graph from stored coordinates to recreate all Node objects with fresh battery/state
+        # Rebuild graph and restore destroy list from stored coordinates
+        self.model._nodes_to_destroy = list(self._destroy_list)
         self.model.build_from_coordinates(self._grid_coords, self._link_range)
         self._layout = self.model.compute_layout_from_coords(self._grid_coords)
         self._log_lines.clear()

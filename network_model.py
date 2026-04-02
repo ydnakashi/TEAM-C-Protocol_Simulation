@@ -281,7 +281,6 @@ class NetworkModel:
         self._destroyed.clear()
         self._to_remove.clear()
         self._destroyed_prob.clear()
-        self._nodes_to_destroy = [9, 2]
         self._received_packets_at_BS = 0
         self._throughputs.clear()
         self._delivered_interval = 0
