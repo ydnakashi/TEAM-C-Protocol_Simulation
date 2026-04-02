@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 import networkx as nx
 import time
 
-from network_model import NetworkModel, LayoutResult
+from network_model import NetworkModel, LayoutResult, Protocol
 from node import STATE_STYLE
 
 # THEME CONSTANTS
@@ -122,6 +122,15 @@ class WirelessSimulator(tk.Tk):
                    textvariable=self.range_var,
                    font=FONT, bg=ENTRY_BG, fg=FG, buttonbackground=BTN_BG,
                    insertbackground=FG, relief="flat").pack(side="left", padx=(4, 12))
+
+        tk.Label(top, text="Protocol:", font=FONT_BOLD, bg=BG, fg=FG).pack(side="left")
+        self._protocol_var = tk.StringVar(value="TEAM-C")
+        proto_menu = tk.OptionMenu(top, self._protocol_var, "TEAM-C", "MI2RSDiC")
+        proto_menu.configure(font=FONT, bg=ENTRY_BG, fg=FG, activebackground=BTN_BG,
+                             activeforeground=FG, highlightthickness=0, relief="flat")
+        proto_menu["menu"].configure(font=FONT, bg=ENTRY_BG, fg=FG,
+                                     activebackground=ACCENT, activeforeground="#11111b")
+        proto_menu.pack(side="left", padx=(4, 12))
 
         tk.Button(top, text="Generate Grid", font=FONT_BOLD,
                   bg=ACCENT, fg="#11111b", activebackground=ACCENT2,
@@ -282,6 +291,7 @@ class WirelessSimulator(tk.Tk):
             messagebox.showerror("Error", "Enter a valid link range."); return
         self._grid_coords = coords
         self.num_nodes = len(coords)
+        self.model._protocol = Protocol.TEAM_C if self._protocol_var.get() == "TEAM-C" else Protocol.MI2RSDiC
         self.model.build_from_coordinates(coords, link_range)
         if not self.model.has_edges():
             messagebox.showwarning(
