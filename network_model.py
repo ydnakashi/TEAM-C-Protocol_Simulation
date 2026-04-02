@@ -638,7 +638,6 @@ class NetworkModel:
 
     def send_election_msg(self, ni, msg):
         """Send message to children and parent if applicable to trigger a re-election"""
-        if(msg["type"] == "UPDATE_HEAD"):
         if msg["type"] == "UPDATE_HEAD":
             self.spawn_packet(msg, ni, msg["oldParent"])
         elif msg["type"] == "UPDATE_NOHEAD":
