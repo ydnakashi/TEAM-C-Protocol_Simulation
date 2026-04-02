@@ -56,6 +56,7 @@ class WirelessSimulator(tk.Tk):
         self.num_nodes: int = 0
         self.distance_entries: list[list[tk.Entry]] = []
         self._grid_coords: list[tuple[float, float]] = []
+        self._link_range: float = 2.0
         self._layout: LayoutResult | None = None
 
         # Simulation animation
@@ -290,6 +291,7 @@ class WirelessSimulator(tk.Tk):
         except ValueError:
             messagebox.showerror("Error", "Enter a valid link range."); return
         self._grid_coords = coords
+        self._link_range = link_range
         self.num_nodes = len(coords)
         self.model._protocol = Protocol.TEAM_C if self._protocol_var.get() == "TEAM-C" else Protocol.MI2RSDiC
         self.model.build_from_coordinates(coords, link_range)
@@ -465,11 +467,17 @@ class WirelessSimulator(tk.Tk):
         self._running = False
         self._stop_animation()
         self.model.reset_simulation()
+        # Rebuild graph from stored coordinates to recreate all Node objects with fresh battery/state
+        self.model.build_from_coordinates(self._grid_coords, self._link_range)
+        self._layout = self.model.compute_layout_from_coords(self._grid_coords)
         self._log_lines.clear()
+        self.network_time_ms = 0
+        self.elapsed_time = 0
         self._stats_var.set("Tick: 0  |  Active: 0  |  Delivered: 0")
         self._btn_start.configure(state="normal", text="▶  Start")
         self._btn_pause.configure(state="disabled")
         self._btn_stop.configure(state="disabled")
+        self._base_menu.configure(state="normal")
         self._draw_sim_frame()
         self._append_log("[STOPPED]  Simulation reset.\n")
 

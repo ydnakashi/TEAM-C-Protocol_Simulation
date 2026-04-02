@@ -269,13 +269,22 @@ class NetworkModel:
         self._graph.nodes[node_id]["node"].state = NodeType.BASE_STATION
 
     def reset_simulation(self) -> None:
-        """Clear all packets and counters; keep graph + base station."""
+        """Full reset: clear packets, counters, destroyed state, and phase."""
         self._packets.clear()
         self._next_packet_id = 1
         self._tick = 0
         self._delivered = 0
         self._dropped = 0
         self._events.clear()
+        self._tdma_slot = 0
+        self._phase = Phase.INIT_ROLES
+        self._destroyed.clear()
+        self._to_remove.clear()
+        self._destroyed_prob.clear()
+        self._nodes_to_destroy = [9, 2]
+        self._received_packets_at_BS = 0
+        self._throughputs.clear()
+        self._delivered_interval = 0
 
     def _get_node(self, ni: int) -> Node:
         """Shorthand to retrieve the Node object for graph node ni."""
