@@ -625,8 +625,9 @@ class WirelessSimulator(tk.Tk):
         print("STATISTICS OF THE NETWORK:")
         avg_throughput = self.model.avg_throughput()
         print(f"Final average throughput: {avg_throughput} packets/250 ticks")
-        if(self.network_time_ms == 0):
-            self.elapsed_time += time.perf_counter() - self.curr_start
+        if self.network_time_ms == 0:
+            if self.curr_start > 0 and self._running:
+                self.elapsed_time += time.perf_counter() - self.curr_start
             print(f"Elapsed time (Network still running) {self.elapsed_time} seconds")
         else:
             print(f"Network lifetime: {self.network_time_ms:.6f} seconds")
