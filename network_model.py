@@ -245,18 +245,6 @@ class NetworkModel:
     def get_nodes(self) -> list[int]:
         return sorted(self._graph.nodes())
 
-    def get_neighbors(self, node_id: int) -> list[int]:
-        return list(self._graph.neighbors(node_id))
-
-    def get_degree(self, node_id: int) -> int:
-        return self._graph.degree(node_id)
-
-    def get_shortest_path(self, source: int, target: int) -> list[int]:
-        return nx.shortest_path(self._graph, source, target)
-
-    def get_shortest_path_length(self, source: int, target: int) -> int:
-        return nx.shortest_path_length(self._graph, source, target)
-
     def compute_layout(self, seed: int = 42) -> LayoutResult:
         G = self._graph
         n = G.number_of_nodes()
