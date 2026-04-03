@@ -216,8 +216,7 @@ class WirelessSimulator(tk.Tk):
 
         # Row-major order; (0,0) top-left, x increases right, y increases downward
         coords: list[tuple[float, float]] = [
-            (float(col), float(row))
-            for row in range(m) for col in range(n)
+            (0, 0), (2, 4), (2, 6), (4, 2), (6, 4), (9, 4), (9, 2), (9, 0), (9, 6), (9, 8), (11, 4), (13, 4)
         ]
         self.num_nodes = len(coords)
         self._grid_coords = coords

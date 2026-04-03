@@ -362,12 +362,13 @@ class NetworkModel:
         """
         if N == 0:
             return 0
-        if L > N:
+        if L > N or N==1:  # not enough data sometimes if elections just occured
             return 1
         t = L / N
         r = 1 - (((12 * L * (N - L))**0.5) / ((N + 1) * N))
         w = 1 - (((t - 1)**2 + (c**2) * (r - 1)**2)**0.5 / (1 + c**2)**0.5)
-        return w
+        proj_w = (w-0.29289)/(1-0.29289)
+        return proj_w
 
     def start_worthiness_calc(self):
         """Recalculate worthiness scores for all active nodes' parents and children."""
@@ -550,7 +551,7 @@ class NetworkModel:
         if pkt.source not in node.chdList:
             return
         node.chdList[pkt.source].powerPercent = pkt.content["power"]
-        node.pkt = pkt
+        node.pkt.append(pkt)
         if pkt.destination == self._base_station:
             self._received_packets_at_BS += 1
 
@@ -575,7 +576,6 @@ class NetworkModel:
         node.parent.L += 1
         node.parent.powerPercent = pkt.content["power"]
         node.overall_score = pkt.content["overall_score"]
-        node.ready_to_send = True
 
     def _handle_ready(self, node: Node, pkt: Packet):
         if pkt.source != node.parent.node.id:
@@ -639,7 +639,7 @@ class NetworkModel:
         }, pkt.destination, pkt.source)
 
         node.chdList[pkt.source].L += 1
-        node.pkt = None
+        node.pkt.pop(0)
         node.chdList[pkt.source].received = True
 
         if node.action == Action.IDLE:
@@ -685,11 +685,15 @@ class NetworkModel:
             self.target_destroy()
 
         # Periodic worthiness recalculation and statistics
-        if self._tick % 200 == 0:
+        if self._tick % 400 == 0:
             self.start_worthiness_calc()
+
+        # For statistics collection
+        if self._tick % 250 == 0 and not self.network_dead():
             self.throughput()
-            dead = self.network_dead()
-            self._delivered_interval = 0
+        if self._tick % 250 == 0:
+            if(self.network_dead()): dead = True
+            self._delivered_interval = 0   # reset interval to determine when network dies
 
         self.move_packets()
         self.purge_delivered()
@@ -733,13 +737,14 @@ class NetworkModel:
             new_head_orphan = None
             if (self._protocol == Protocol.TEAM_C and
                     not node.await_parent and node.action != Action.AWAIT_REQS):
-                orphan_msg, new_head_orphan = self.observe_parent_potential(ni, 0)
+                orphan_msg, new_head_orphan = self.observe_parent_potential(ni, 0.001)
                 if orphan_msg is not None:
                     node.action = Action.ORPHAN_ELECTION
                     node.await_parent = True
 
             # For edge case where there is just a node left with no children connected to the BS
-            if(len(node.chdList) == 0 and node.parent and node.parent.node and node.parent.node.id == self._base_station and node.action == Action.IDLE and node.timer<=0):
+            if(len(node.chdList) == 0 and node.parent and node.parent.node and \
+               node.parent.node.id == self._base_station and node.action == Action.IDLE and node.timer<=0):
                 node.action = Action.SEND_DATA
                 node.timer = self._loss_interval
 
@@ -747,8 +752,8 @@ class NetworkModel:
             if self._should_send_data(ni, node):
                 self.send_data_packet(ni)
 
-            elif node.pkt:
-                self.send_data_ack(node.pkt)
+            elif len(node.pkt) > 0:
+                self.send_data_ack(node.pkt[0])
 
             elif self._should_run_election(node):
                 self._process_election(ni, node)
@@ -1001,6 +1006,7 @@ class NetworkModel:
         node = self._get_node(ni)
 
         if node.id in msg["chdList"]:
+            # Update new parent
             node.parent = Parent()
             node.parent.node = self._get_node(msg["newHead"])
             old_head_state = self._get_node(msg["oldHead"]).state
@@ -1034,7 +1040,7 @@ class NetworkModel:
         return node
 
     def update_no_head_orphan(self, ni, msg):
-        """Called when a node receives an UPDATEE_NOHEAD_ORPHAN message"""
+        """Called when a node receives an UPDATE_NOHEAD_ORPHAN message"""
         node = self._graph.nodes[ni]["node"]
         node_state = node.state
         

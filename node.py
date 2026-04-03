@@ -98,7 +98,7 @@ class Node:
 
         # State machine
         self.action = Action.IDLE
-        self.pkt = None
+        self.pkt = []
         self.orphans = {}
         self.await_parent = False
 
